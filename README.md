@@ -1,6 +1,21 @@
 # SIEM Tool
 
-A Security Information and Event Management tool with real-time network traffic monitoring, rule-based alert detection, and AI-powered threat analysis.
+A Security Information and Event Management tool with real-time network traffic monitoring,
+rule-based alert detection, and AI-powered threat analysis.
+
+---
+
+## Tech Stack
+
+| Component | Language / Framework |
+|---|---|
+| REST API + WebSocket | PHP / Symfony 7 + Ratchet |
+| Packet capture | Python / scapy |
+| Rule engine | Python |
+| AI agents | Python / Ollama (local LLM) |
+| Frontend | React / TypeScript |
+| Database | PostgreSQL (Doctrine ORM) |
+| Event bus | Redis |
 
 ---
 
@@ -8,20 +23,14 @@ A Security Information and Event Management tool with real-time network traffic 
 
 ```
 siem-tool/
-├── backend/
-│   ├── app/
-│   │   ├── agents/        # AI agents — Threat Analyst (Agent 1) and Incident Response (Agent 2)
-│   │   ├── api/           # HTTP route handlers and WebSocket endpoint
-│   │   ├── capture/       # Network packet capture and traffic simulator
-│   │   ├── core/          # App config, database connection, Redis client
-│   │   ├── models/        # Database models
-│   │   ├── parsers/       # Packet parsing and normalization
-│   │   ├── rules/         # Detection rule engine and default rules
-│   │   ├── schemas/       # Request/response schemas
-│   │   └── services/      # Business logic — stats, export
-│   └── tests/             # Automated tests and agent evaluations
-├── frontend/
-│   ├── public/
+├── backend/               # PHP / Symfony — REST API + WebSocket (Teammate 1)
+│                          # Symfony scaffolds its own structure here via composer
+├── services/              # Python standalone services
+│   ├── capture/           # Packet capture, traffic stats (Teammate 2)
+│   │   └── parsers/       # Packet normalization
+│   ├── rules/             # Detection rule engine + alert creation (Teammate 3)
+│   └── agents/            # AI Agents 1 and 2 — Ollama integration (Teammate 4)
+├── frontend/              # React + TypeScript (Teammate 5)
 │   └── src/
 │       ├── api/           # API client functions
 │       ├── components/
@@ -29,14 +38,14 @@ siem-tool/
 │       │   ├── dashboard/ # Live traffic feed, stats charts
 │       │   ├── incidents/ # Incident timeline, remediation panel
 │       │   ├── layout/    # Sidebar, top bar
-│       │   └── shared/    # Reusable components (badges, pagination, spinner)
-│       ├── hooks/         # Custom React hooks (WebSocket, etc.)
-│       ├── pages/         # Page components (Dashboard, Alerts, Events, Incidents, Settings)
-│       ├── tests/         # Frontend component and hook tests
+│       │   └── shared/    # Reusable components
+│       ├── hooks/         # WebSocket hook
+│       ├── pages/         # Dashboard, Alerts, Events, Incidents, Settings
+│       ├── tests/         # Frontend tests
 │       └── types/         # TypeScript type definitions
 ├── docs/
 │   ├── diagrams/          # Architecture, ER diagram, sequence diagrams, state machines
-│   ├── teammate_instructions/ # Per-teammate implementation guides with AI prompts
+│   ├── teammate_instructions/ # Per-teammate implementation guides
 │   └── SIEM_backlog.md    # User stories and backlog
 └── .github/
     ├── ISSUE_TEMPLATE/    # Bug report template
@@ -52,11 +61,11 @@ siem-tool/
 - [ER Diagram](docs/diagrams/er-diagram.md)
 - [Sequence Diagram — Alert Flow](docs/diagrams/sequence-alert-flow.md)
 - [Sequence Diagram — Incident Creation](docs/diagrams/sequence-incident.md)
-- [Alert & Incident Lifecycle](docs/diagrams/alert-lifecycle.md)
+- [Alert and Incident Lifecycle](docs/diagrams/alert-lifecycle.md)
 
 ### Teammate Instructions
-- [Teammate 1 — Backend Core & Infrastructure](docs/teammate_instructions/teammate1_infrastructure.md)
-- [Teammate 2 — Network Capture & Traffic Processing](docs/teammate_instructions/teammate2_capture.md)
-- [Teammate 3 — Rule Engine & Alert Management](docs/teammate_instructions/teammate3_rules_alerts.md)
-- [Teammate 4 — AI Agents](docs/teammate_instructions/teammate4_ai_agents.md)
-- [Teammate 5 — Frontend](docs/teammate_instructions/teammate5_frontend.md)
+- [Teammate 1 — PHP / Symfony — REST API, WebSocket, Docker, CI/CD](docs/teammate_instructions/teammate1_infrastructure.md)
+- [Teammate 2 — Python — Network Capture and Traffic Processing](docs/teammate_instructions/teammate2_capture.md)
+- [Teammate 3 — Python — Rule Engine and Alert Management](docs/teammate_instructions/teammate3_rules_alerts.md)
+- [Teammate 4 — Python — AI Agents (Ollama)](docs/teammate_instructions/teammate4_ai_agents.md)
+- [Teammate 5 — React / TypeScript — Frontend](docs/teammate_instructions/teammate5_frontend.md)

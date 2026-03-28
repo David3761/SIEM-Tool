@@ -1,14 +1,15 @@
-# Teammate 1 — Backend Core & Infrastructure
+# Teammate 1 — Backend Core & Infrastructure (PHP / Symfony)
 
 ## Role Overview
 
-You are the foundation of the entire project. Every other teammate depends on what you build.
-Your job is to: scaffold the FastAPI backend, define all database models, set up Docker Compose
-for all 6 services, wire up the Redis client, build the CI/CD pipeline, and implement the
-monitoring configuration API (US-06).
+You build the entire HTTP API and WebSocket server using PHP and Symfony.
+You own the database schema (Doctrine ORM + migrations), all REST endpoints,
+real-time WebSocket broadcasting (Ratchet), Docker Compose for the whole project,
+and CI/CD pipelines.
 
-Nothing works without you finishing first. Coordinate with teammates early so they can start
-plugging into your scaffold.
+Python services (Teammates 2, 3, 4) write directly to the shared PostgreSQL database
+and publish events to Redis. You read that data and serve it to the frontend via REST.
+Your Ratchet WebSocket server subscribes to Redis and pushes real-time events to the browser.
 
 ---
 
@@ -16,349 +17,303 @@ plugging into your scaffold.
 
 | Story | Description |
 |---|---|
-| US-06 | As a network admin, I want to configure which IPs/subnets to monitor |
+| US-06 | Configure which IPs/subnets to monitor (GET/PUT /api/config) |
 
-All other stories depend on your database models and project skeleton.
+Every REST API endpoint in the project lives in your Symfony app.
 
 ---
 
-## Context — Why Each Piece Exists
+## Tech Stack
 
-### FastAPI
-The backend API server. All other backend teammates (P2, P3, P4) add their own routers to this
-app. The frontend (P5) calls this API. You define the app entrypoint and the shared core modules.
+| Tool | Purpose |
+|---|---|
+| Symfony 7 | PHP web framework |
+| Doctrine ORM | Database models and migrations |
+| Ratchet (`cboden/ratchet`) | PHP WebSocket server |
+| predis/predis | Redis client for PHP |
+| PHP 8.3 | Language |
+| PostgreSQL | Main database |
+| Redis | Event bus — you subscribe and broadcast |
+| Docker | Containerization |
+| GitHub Actions | CI/CD |
 
-### PostgreSQL
-The permanent store for everything: captured events, alerts, incidents, rules, and config.
-All teammates read/write PostgreSQL through SQLAlchemy models you define. If you define a field
-wrong, everyone breaks.
+---
 
-### Redis
-A fast in-memory message bus. It is NOT used for permanent storage — only for real-time
-communication between services:
-- Capture service (P2) publishes raw events to Redis
-- Rule engine (P3) subscribes to events, publishes alerts to Redis
-- AI agents (P4) subscribe to alerts
-- WebSocket handler (you) subscribes to everything and forwards to the browser (P5)
+## Context
 
-Redis enables millisecond-latency live updates without polling the database.
+### Why Symfony?
+Symfony is a mature PHP framework with excellent support for REST APIs via its controller
+system, Doctrine ORM for database management, and a console command system that lets
+Ratchet run as a long-lived worker process.
 
-### Docker Compose
-Defines all 6 containers and makes them talk to each other. You write the single
-`docker-compose.yml` that the entire team uses to run the project locally.
+### Why Ratchet for WebSocket?
+The frontend needs real-time updates (new alerts appearing, AI analysis completing) without
+polling. Ratchet is the standard PHP WebSocket library. It runs as a separate Symfony console
+command (`php bin/console app:websocket:serve`) on port 8080.
 
-### GitHub Actions CI/CD
-Automated pipeline that runs on every pull request (lint + test) and on every merge to `main`
-(build Docker images). Required for the project grade.
+### How does Ratchet know what to broadcast?
+Python services publish events to Redis channels. Ratchet subscribes to those channels
+in its event loop and forwards each message as JSON to all connected browser clients.
+
+### Why does the capture service call your API?
+The monitoring config (which interfaces/subnets to watch) is stored in PostgreSQL and
+editable via the frontend. The Python capture service polls `GET /api/config` every 60
+seconds so that config changes take effect without restarting any container.
 
 ---
 
 ## Architecture Position
 
 ```
-You own everything in this diagram:
+Browser ──HTTP:8000──► [Symfony REST API] ──► PostgreSQL (Doctrine)
+Browser ──WS:8080───► [Ratchet WebSocket] ◄── Redis (subscribes to all channels)
 
-  [docker-compose.yml]
-       │
-       ├── [postgres container]  ←── your SQLAlchemy models define the schema
-       ├── [redis container]     ←── your redis_client.py is used by all teammates
-       ├── [ollama container]    ←── configured by you, used by P4
-       ├── [frontend container]  ←── Dockerfile written by P5, orchestrated by you
-       ├── [capture container]   ←── Dockerfile written by P2, orchestrated by you
-       └── [backend container]   ←── your FastAPI app, P2/P3/P4 add routers to it
-
-  [GitHub Actions]
-       ├── ci.yml  → runs on PR: lint, pytest
-       └── cd.yml  → runs on merge to main: docker build
+Python services write to PostgreSQL directly and publish to Redis.
+Symfony reads PostgreSQL to serve REST responses.
+Ratchet subscribes to Redis and pushes to all connected browsers.
 ```
 
 ---
 
-## What You Receive (Inputs)
+## Symfony Project Structure
 
-- HTTP PUT requests from the frontend (P5) to update monitoring config
-- HTTP GET requests from the frontend (P5) to read monitoring config
-- The capture service (P2) reads the monitoring config from your API at startup
-
----
-
-## What You Produce (Outputs)
-
-1. **The FastAPI app skeleton** — P2, P3, P4 import and register their routers into `app/main.py`
-2. **SQLAlchemy models** — used by all backend teammates to read/write the DB
-3. **Redis client** — used by all backend teammates to publish/subscribe
-4. **Docker Compose** — used by the whole team to run locally
-5. **CI/CD pipeline** — runs automatically on GitHub
-6. **Config API** — consumed by P2 (capture) and P5 (frontend settings page)
-
----
-
-## File Structure You Own
-
+Bootstrap with:
+```bash
+composer create-project symfony/skeleton backend
+cd backend
+composer require symfony/orm-pack predis/predis cboden/ratchet \
+    symfony/uid symfony/validator league/csv dompdf/dompdf
 ```
-siem-tool/
-├── docker-compose.yml
-├── Makefile
-├── .github/
-│   └── workflows/
-│       ├── ci.yml
-│       └── cd.yml
-└── backend/
-    ├── Dockerfile
-    ├── requirements.txt
-    ├── alembic.ini
-    ├── alembic/
-    │   └── versions/
-    └── app/
-        ├── main.py              ← FastAPI app, mounts all routers
-        ├── core/
-        │   ├── config.py        ← env var settings (DB URL, Redis URL, etc.)
-        │   ├── database.py      ← SQLAlchemy engine + session
-        │   └── redis_client.py  ← Redis connection + pub/sub helpers
-        ├── models/
-        │   ├── __init__.py
-        │   ├── event.py         ← NetworkEvent model
-        │   ├── alert.py         ← Alert model
-        │   ├── incident.py      ← Incident model
-        │   ├── rule.py          ← Rule model
-        │   └── monitoring_config.py  ← MonitoringConfig model
-        ├── api/
-        │   ├── __init__.py
-        │   ├── config.py        ← US-06: GET/PUT /api/config
-        │   └── ws.py            ← WebSocket endpoint /ws
-        └── schemas/
-            ├── event.py         ← Pydantic schemas for NetworkEvent
-            ├── alert.py         ← Pydantic schemas for Alert
-            ├── incident.py      ← Pydantic schemas for Incident
-            └── config.py        ← Pydantic schemas for MonitoringConfig
+
+Key files you create:
+```
+backend/
+├── src/
+│   ├── Controller/
+│   │   ├── AlertController.php
+│   │   ├── EventController.php
+│   │   ├── IncidentController.php
+│   │   ├── RuleController.php
+│   │   └── ConfigController.php
+│   ├── Entity/
+│   │   ├── NetworkEvent.php
+│   │   ├── Alert.php
+│   │   ├── Incident.php
+│   │   ├── Rule.php
+│   │   └── MonitoringConfig.php
+│   ├── Repository/
+│   │   ├── NetworkEventRepository.php
+│   │   ├── AlertRepository.php
+│   │   └── IncidentRepository.php
+│   └── Command/
+│       └── WebSocketServeCommand.php
+├── migrations/
+├── tests/
+└── composer.json
 ```
 
 ---
 
-## Database Models — Full Specification
+## Doctrine Entities — Full Specification
 
-Define all of these in SQLAlchemy. Use UUIDs as primary keys (except MonitoringConfig).
-
-### NetworkEvent (`network_events` table)
-
-```python
-class NetworkEvent(Base):
-    __tablename__ = "network_events"
-
-    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    timestamp    = Column(DateTime(timezone=True), nullable=False, index=True)
-    src_ip       = Column(String(45), nullable=False, index=True)   # supports IPv6
-    dst_ip       = Column(String(45), nullable=False, index=True)
-    src_port     = Column(Integer, nullable=True)
-    dst_port     = Column(Integer, nullable=True, index=True)
-    protocol     = Column(String(10), nullable=False)  # "TCP", "UDP", "ICMP"
-    bytes_sent   = Column(Integer, nullable=False, default=0)
-    direction    = Column(String(10), nullable=False)  # "inbound", "outbound", "internal"
-    interface    = Column(String(20), nullable=False)  # "eth0", "wlan0"
-    flags        = Column(String(20), nullable=True)   # TCP flags: "SYN", "SYN-ACK", etc.
-```
-
-### Alert (`alerts` table)
-
-```python
-class Alert(Base):
-    __tablename__ = "alerts"
-
-    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    rule_id           = Column(String(100), nullable=False, index=True)
-    rule_name         = Column(String(200), nullable=False)
-    severity          = Column(String(20), nullable=False)  # "low","medium","high","critical"
-    timestamp         = Column(DateTime(timezone=True), nullable=False, index=True)
-    status            = Column(String(30), nullable=False, default="open")
-                        # "open", "acknowledged", "false_positive", "resolved"
-    triggering_event_id = Column(UUID(as_uuid=True), ForeignKey("network_events.id"))
-    related_event_ids = Column(JSON, nullable=False, default=list)  # list of UUID strings
-    ai_analysis       = Column(JSON, nullable=True)  # filled by AI Agent 1 (P4)
-    incident_id       = Column(UUID(as_uuid=True), ForeignKey("incidents.id"), nullable=True)
-```
-
-### Incident (`incidents` table)
-
-```python
-class Incident(Base):
-    __tablename__ = "incidents"
-
-    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    title          = Column(String(300), nullable=False)
-    description    = Column(Text, nullable=True)
-    severity       = Column(String(20), nullable=False)
-    status         = Column(String(30), nullable=False, default="open")
-                     # "open", "in_progress", "resolved"
-    created_at     = Column(DateTime(timezone=True), default=func.now())
-    updated_at     = Column(DateTime(timezone=True), onupdate=func.now())
-    alert_ids      = Column(JSON, nullable=False, default=list)
-    ai_remediation = Column(JSON, nullable=True)  # filled by AI Agent 2 (P4)
-    timeline       = Column(JSON, nullable=True)  # list of timeline events
-```
-
-### Rule (`rules` table)
-
-```python
-class Rule(Base):
-    __tablename__ = "rules"
-
-    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    name        = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
-    rule_type   = Column(String(50), nullable=False)  # "threshold", "pattern", "blacklist"
-    severity    = Column(String(20), nullable=False)
-    config      = Column(JSON, nullable=False)  # rule-specific params (see P3 doc)
-    enabled     = Column(Boolean, nullable=False, default=True)
-    created_at  = Column(DateTime(timezone=True), default=func.now())
-```
-
-### MonitoringConfig (`monitoring_config` table)
-
-```python
-class MonitoringConfig(Base):
-    __tablename__ = "monitoring_config"
-
-    id                   = Column(Integer, primary_key=True, default=1)  # always 1 row
-    monitored_interfaces = Column(JSON, nullable=False, default=["eth0"])
-    monitored_subnets    = Column(JSON, nullable=False, default=["0.0.0.0/0"])
-    excluded_ips         = Column(JSON, nullable=False, default=[])
-    updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
-```
-
----
-
-## API Endpoints to Implement (US-06)
-
-### GET /api/config
-Returns current monitoring configuration.
-
-**Request:** No body.
-
-**Response (200):**
-```json
-{
-  "monitored_interfaces": ["eth0", "wlan0"],
-  "monitored_subnets": ["192.168.1.0/24", "10.0.0.0/8"],
-  "excluded_ips": ["192.168.1.1", "10.0.0.1"],
-  "updated_at": "2024-01-15T10:00:00Z"
+### NetworkEvent
+```php
+#[ORM\Entity, ORM\Table(name: 'network_events')]
+class NetworkEvent {
+    #[ORM\Id, ORM\Column(type: 'uuid')]   private string $id;
+    #[ORM\Column(type: 'datetime_immutable')]  private \DateTimeImmutable $timestamp;
+    #[ORM\Column(length: 45)]             private string $srcIp;
+    #[ORM\Column(length: 45)]             private string $dstIp;
+    #[ORM\Column(nullable: true)]         private ?int $srcPort;
+    #[ORM\Column(nullable: true)]         private ?int $dstPort;
+    #[ORM\Column(length: 10)]             private string $protocol;  // TCP UDP ICMP OTHER
+    #[ORM\Column]                         private int $bytesSent;
+    #[ORM\Column(length: 10)]             private string $direction; // inbound outbound internal
+    #[ORM\Column(length: 20)]             private string $interface;
+    #[ORM\Column(length: 20, nullable: true)] private ?string $flags;
 }
 ```
 
-### PUT /api/config
-Updates monitoring configuration (full replace).
-
-**Request body:**
-```json
-{
-  "monitored_interfaces": ["eth0"],
-  "monitored_subnets": ["192.168.1.0/24"],
-  "excluded_ips": []
+### Alert
+```php
+#[ORM\Entity, ORM\Table(name: 'alerts')]
+class Alert {
+    #[ORM\Id, ORM\Column(type: 'uuid')]       private string $id;
+    #[ORM\Column(length: 100)]                private string $ruleId;
+    #[ORM\Column(length: 200)]                private string $ruleName;
+    #[ORM\Column(length: 20)]                 private string $severity; // low medium high critical
+    #[ORM\Column(type: 'datetime_immutable')] private \DateTimeImmutable $timestamp;
+    #[ORM\Column(length: 30)]                 private string $status;   // open acknowledged false_positive resolved
+    #[ORM\Column(type: 'uuid', nullable: true)]  private ?string $triggeringEventId;
+    #[ORM\Column(type: 'json')]               private array $relatedEventIds = [];
+    #[ORM\Column(type: 'json', nullable: true)]  private ?array $aiAnalysis = null;
+    #[ORM\Column(type: 'uuid', nullable: true)]  private ?string $incidentId = null;
 }
 ```
 
-**Response (200):** Same as GET response with updated `updated_at`.
+### Incident
+```php
+#[ORM\Entity, ORM\Table(name: 'incidents')]
+class Incident {
+    #[ORM\Id, ORM\Column(type: 'uuid')]       private string $id;
+    #[ORM\Column(length: 300)]                private string $title;
+    #[ORM\Column(type: 'text', nullable: true)]  private ?string $description;
+    #[ORM\Column(length: 20)]                 private string $severity;
+    #[ORM\Column(length: 30)]                 private string $status = 'open'; // open in_progress resolved
+    #[ORM\Column(type: 'datetime_immutable')] private \DateTimeImmutable $createdAt;
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)] private ?\DateTimeImmutable $updatedAt;
+    #[ORM\Column(type: 'json')]               private array $alertIds = [];
+    #[ORM\Column(type: 'json', nullable: true)]  private ?array $aiRemediation = null;
+    #[ORM\Column(type: 'json', nullable: true)]  private ?array $timeline = null;
+}
+```
 
-**Validation rules:**
-- `monitored_interfaces`: non-empty list of strings
-- `monitored_subnets`: valid CIDR notation (use `ipaddress` stdlib to validate)
-- `excluded_ips`: valid IPv4/IPv6 addresses
+### Rule
+```php
+#[ORM\Entity, ORM\Table(name: 'rules')]
+class Rule {
+    #[ORM\Id, ORM\Column(type: 'uuid')]       private string $id;
+    #[ORM\Column(length: 200)]                private string $name;
+    #[ORM\Column(type: 'text', nullable: true)]  private ?string $description;
+    #[ORM\Column(length: 50)]                 private string $ruleType; // threshold
+    #[ORM\Column(length: 20)]                 private string $severity;
+    #[ORM\Column(type: 'json')]               private array $config;
+    #[ORM\Column]                             private bool $enabled = true;
+    #[ORM\Column(type: 'datetime_immutable')] private \DateTimeImmutable $createdAt;
+}
+```
+
+### MonitoringConfig
+```php
+#[ORM\Entity, ORM\Table(name: 'monitoring_config')]
+class MonitoringConfig {
+    #[ORM\Id, ORM\Column]   private int $id = 1;   // always a single row
+    #[ORM\Column(type: 'json')]  private array $monitoredInterfaces = ['eth0'];
+    #[ORM\Column(type: 'json')]  private array $monitoredSubnets = ['0.0.0.0/0'];
+    #[ORM\Column(type: 'json')]  private array $excludedIps = [];
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)] private ?\DateTimeImmutable $updatedAt;
+}
+```
 
 ---
 
-## WebSocket Endpoint — /ws
+## API Endpoints — Full Specification
 
-This is the real-time channel to the frontend. You implement the endpoint; other teammates
-publish messages to Redis and this handler forwards them to all connected browser clients.
+### GET /api/events
+Query params: `page`, `limit`(max 200), `src_ip`, `dst_ip`, `protocol`, `port` (matches src OR dst), `direction`, `from`, `to`
 
-```python
-# app/api/ws.py
-@router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    # Subscribe to Redis channels: "traffic:events", "alerts:new", "alerts:updated"
-    # Forward every message received from Redis to this WebSocket client
-    # Handle disconnect gracefully
-```
+### GET /api/stats?range=1h
+Valid ranges: `15m`, `1h`, `6h`, `24h`, `7d`
 
-**Message format sent to frontend:**
+Response:
 ```json
-{ "type": "traffic_event", "data": { ...NetworkEvent fields... } }
-{ "type": "new_alert",     "data": { ...Alert fields... } }
-{ "type": "alert_updated", "data": { ...Alert fields with ai_analysis filled... } }
+{
+  "time_range": "1h", "total_events": 8450, "total_bytes": 12582912,
+  "events_per_minute": 140.8,
+  "top_source_ips": [{"ip": "192.168.1.100", "event_count": 3200, "bytes": 4096000}],
+  "top_destination_ips": [{"ip": "8.8.8.8", "event_count": 900, "bytes": 1200000}],
+  "top_ports": [{"port": 443, "protocol": "TCP", "event_count": 4200}],
+  "protocol_breakdown": {"TCP": 6800, "UDP": 1400, "ICMP": 250},
+  "inbound_count": 3100, "outbound_count": 5200, "internal_count": 150
+}
+```
+
+### GET /api/alerts
+Query params: `status`, `severity`, `rule_id`, `from`, `to`, `page`, `limit`
+
+### PATCH /api/alerts/{id}
+Body: `{"status": "acknowledged"}` — valid values: `acknowledged`, `false_positive`, `resolved`
+Returns 422 on invalid status.
+
+### GET /api/alerts/export?format=csv|pdf
+CSV: `Content-Type: text/csv` with headers: `id,rule_name,severity,timestamp,status,src_ip,dst_ip`
+PDF: use dompdf, table layout with title showing date range
+
+### POST /api/incidents
+Body: `{"title": "...", "alert_ids": ["uuid1", "uuid2"]}`
+Sets severity = max severity across all provided alerts. Returns 201.
+
+### GET/PUT /api/config (US-06)
+PUT validates each subnet with `inet_pton()` — returns 422 with field error on invalid CIDR.
+
+---
+
+## WebSocket Server
+
+```php
+// src/Command/WebSocketServeCommand.php
+// Run with: php bin/console app:websocket:serve
+
+class WebSocketServeCommand extends Command
+{
+    // On start: subscribe to Redis channels traffic:events, alerts:new, alerts:updated
+    // For each message received from Redis: broadcast to all connected WS clients as:
+    // {"type": "traffic_event"|"new_alert"|"alert_updated", "data": {decoded JSON}}
+    // Handle client connect/disconnect gracefully
+    // Runs on port 8080
+}
 ```
 
 ---
 
-## Docker Compose — Full Specification
+## Docker Compose
 
 ```yaml
-# docker-compose.yml
 version: "3.9"
-
 services:
   postgres:
     image: postgres:16
-    environment:
-      POSTGRES_DB: siem
-      POSTGRES_USER: siem
-      POSTGRES_PASSWORD: siempassword
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U siem"]
-      interval: 5s
-      retries: 5
+    environment: { POSTGRES_DB: siem, POSTGRES_USER: siem, POSTGRES_PASSWORD: siempassword }
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+    healthcheck: { test: ["CMD-SHELL","pg_isready -U siem"], interval: 5s, retries: 5 }
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+    ports: ["6379:6379"]
 
   ollama:
     image: ollama/ollama:latest
-    volumes:
-      - ollama_models:/root/.ollama
-    ports:
-      - "11434:11434"
+    volumes: [ollama_models:/root/.ollama]
+    ports: ["11434:11434"]
 
   backend:
     build: ./backend
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis:    { condition: service_healthy }
+    depends_on: { postgres: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem
+      REDIS_URL: redis://redis:6379
+    ports: ["8000:8000", "8080:8080"]
+
+  capture:
+    build: ./services/capture
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      DATABASE_URL: postgresql://siem:siempassword@localhost:5432/siem
+      REDIS_URL: redis://localhost:6379
+      BACKEND_URL: http://localhost:8000
+    depends_on: [redis, postgres]
+
+  rules:
+    build: ./services/rules
+    environment:
+      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem
+      REDIS_URL: redis://redis:6379
+    depends_on: [redis, postgres]
+
+  agents:
+    build: ./services/agents
     environment:
       DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem
       REDIS_URL: redis://redis:6379
       OLLAMA_URL: http://ollama:11434
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/app  # hot reload in dev
-
-  capture:
-    build: ./backend
-    command: python -m app.capture.sniffer
-    network_mode: host        # must see real network interfaces
-    cap_add: [NET_RAW, NET_ADMIN]
-    environment:
-      REDIS_URL: redis://localhost:6379   # host network → use localhost
-      DATABASE_URL: postgresql://siem:siempassword@localhost:5432/siem
-      BACKEND_URL: http://localhost:8000
-    depends_on:
-      - redis
-      - postgres
+    depends_on: [redis, postgres, ollama]
 
   frontend:
     build: ./frontend
-    ports:
-      - "3000:80"
-    depends_on:
-      - backend
+    ports: ["3000:80"]
+    depends_on: [backend]
 
 volumes:
   postgres_data:
@@ -367,204 +322,188 @@ volumes:
 
 ---
 
-## CI/CD Pipeline
+## Makefile
 
-### .github/workflows/ci.yml (runs on every PR)
+```makefile
+start:
+	docker compose up -d
 
+stop:
+	docker compose down
+
+logs:
+	docker compose logs -f
+
+migrate:
+	docker compose exec backend php bin/console doctrine:migrations:migrate --no-interaction
+
+test:
+	docker compose exec backend php bin/phpunit
+	cd frontend && npm test
+```
+
+---
+
+## CI/CD
+
+### .github/workflows/ci.yml
 ```yaml
 name: CI
-
 on:
   pull_request:
     branches: [main]
-
 jobs:
   test-backend:
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16
-        env:
-          POSTGRES_DB: siem_test
-          POSTGRES_USER: siem
-          POSTGRES_PASSWORD: siempassword
+        env: { POSTGRES_DB: siem_test, POSTGRES_USER: siem, POSTGRES_PASSWORD: siempassword }
         ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-retries 5
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 5
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -r backend/requirements.txt
-      - run: pip install ruff pytest pytest-asyncio httpx
-      - run: ruff check backend/
-      - run: pytest backend/tests/ -v
-        env:
-          DATABASE_URL: postgresql://siem:siempassword@localhost:5432/siem_test
-          REDIS_URL: redis://localhost:6379
-
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: "8.3" }
+      - run: composer install
+        working-directory: backend
+      - run: php bin/console doctrine:migrations:migrate --no-interaction
+        working-directory: backend
+        env: { DATABASE_URL: postgresql://siem:siempassword@localhost:5432/siem_test }
+      - run: php bin/phpunit
+        working-directory: backend
+        env: { DATABASE_URL: postgresql://siem:siempassword@localhost:5432/siem_test }
   test-frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
-      - run: npm ci
-        working-directory: frontend
-      - run: npm run lint
-        working-directory: frontend
-      - run: npm run test
+      - run: npm ci && npm test
         working-directory: frontend
 ```
 
-### .github/workflows/cd.yml (runs on merge to main)
-
+### .github/workflows/cd.yml
 ```yaml
 name: CD
-
 on:
   push:
     branches: [main]
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build backend image
-        run: docker build -t siem-backend ./backend
-      - name: Build frontend image
-        run: docker build -t siem-frontend ./frontend
+      - run: docker build -t siem-backend ./backend
+      - run: docker build -t siem-frontend ./frontend
 ```
-
----
-
-## Redis Client — Specification
-
-```python
-# app/core/redis_client.py
-import redis.asyncio as aioredis
-
-# CHANNELS (all teammates must use these exact names):
-CHANNEL_TRAFFIC_EVENTS = "traffic:events"   # P2 publishes, backend WS handler subscribes
-CHANNEL_ALERTS_NEW     = "alerts:new"       # P3 publishes, P4 subscribes
-CHANNEL_ALERTS_UPDATED = "alerts:updated"   # P4 publishes, backend WS handler subscribes
-
-async def get_redis() -> aioredis.Redis:
-    """Dependency injection for FastAPI routes."""
-
-async def publish(channel: str, message: dict) -> None:
-    """Serialize message to JSON and publish to channel."""
-
-async def subscribe(channel: str):
-    """Return an async generator that yields messages from channel."""
-```
-
----
-
-## requirements.txt
-
-```
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-sqlalchemy==2.0.30
-alembic==1.13.1
-asyncpg==0.29.0
-psycopg2-binary==2.9.9
-redis==5.0.4
-python-dotenv==1.0.1
-pydantic==2.7.1
-pydantic-settings==2.2.1
-httpx==0.27.0
-pytest==8.2.0
-pytest-asyncio==0.23.6
-ruff==0.4.4
-```
-
----
-
-## Testing Requirements
-
-Write tests in `backend/tests/test_infrastructure.py`:
-
-1. Test that the database connects and all tables are created
-2. Test GET /api/config returns default config on fresh DB
-3. Test PUT /api/config updates and validates correctly
-4. Test PUT /api/config with invalid CIDR returns 422
-5. Test WebSocket connects successfully
 
 ---
 
 ## AI Prompt — Give This Exactly to Claude
 
 ```
-You are implementing the backend core and infrastructure for a SIEM (Security Information and
-Event Management) tool. The project uses FastAPI, PostgreSQL (SQLAlchemy + Alembic),
-Redis (for real-time pub/sub), and is containerized with Docker Compose.
+You are implementing the backend API and WebSocket server for a SIEM tool using PHP 8.3,
+Symfony 7, Doctrine ORM, and Ratchet (cboden/ratchet) for WebSocket.
 
-Your task is to implement the following files exactly as described:
+DATABASE ENTITIES in PostgreSQL (create as Doctrine entities with full annotations):
 
-PROJECT STRUCTURE:
-backend/
-  app/
-    main.py              - FastAPI app that mounts routers from api/config.py and api/ws.py
-    core/
-      config.py          - Pydantic Settings reading DATABASE_URL, REDIS_URL, OLLAMA_URL from env
-      database.py        - Async SQLAlchemy engine, Base, get_db dependency
-      redis_client.py    - Async redis client with publish() and subscribe() helpers
-                           Channels: "traffic:events", "alerts:new", "alerts:updated"
-    models/
-      event.py           - NetworkEvent SQLAlchemy model (fields: id UUID PK, timestamp, src_ip,
-                           dst_ip, src_port, dst_port, protocol, bytes_sent, direction, interface, flags)
-      alert.py           - Alert model (fields: id, rule_id, rule_name, severity, timestamp,
-                           status["open","acknowledged","false_positive","resolved"], triggering_event_id FK,
-                           related_event_ids JSON, ai_analysis JSON nullable, incident_id FK nullable)
-      incident.py        - Incident model (fields: id, title, description, severity, status,
-                           created_at, updated_at, alert_ids JSON, ai_remediation JSON nullable,
-                           timeline JSON nullable)
-      rule.py            - Rule model (fields: id, name, description, rule_type, severity,
-                           config JSON, enabled bool, created_at)
-      monitoring_config.py - MonitoringConfig model (single row, id=1, monitored_interfaces JSON,
-                           monitored_subnets JSON, excluded_ips JSON, updated_at)
-    schemas/             - Pydantic v2 schemas mirroring each model for request/response
-    api/
-      config.py          - GET /api/config and PUT /api/config
-                           PUT validates CIDR with Python ipaddress stdlib
-                           Returns 422 with clear error message on invalid subnet
-      ws.py              - WebSocket /ws endpoint
-                           Subscribes to all three Redis channels
-                           Forwards to all connected WebSocket clients as JSON:
-                           {"type": "traffic_event"|"new_alert"|"alert_updated", "data": {...}}
-                           Handles client disconnect gracefully
+NetworkEvent (table: network_events): id uuid PK, timestamp datetime_immutable, src_ip string(45),
+dst_ip string(45), src_port int nullable, dst_port int nullable, protocol string (TCP/UDP/ICMP/OTHER),
+bytes_sent int, direction string (inbound/outbound/internal), interface string, flags string nullable
 
-DOCKER COMPOSE: Write docker-compose.yml with services: postgres, redis, ollama, backend, capture, frontend.
-  - capture uses network_mode: host and cap_add: [NET_RAW, NET_ADMIN]
-  - backend depends_on postgres (healthy) and redis (healthy)
-  - volumes: postgres_data, ollama_models
+Alert (table: alerts): id uuid PK, rule_id string, rule_name string, severity string
+(low/medium/high/critical), timestamp datetime_immutable, status string
+(open/acknowledged/false_positive/resolved), triggering_event_id uuid nullable,
+related_event_ids json array, ai_analysis json nullable, incident_id uuid nullable
 
-MAKEFILE: Write a Makefile with targets: start, stop, logs, status, migrate, test
+Incident (table: incidents): id uuid PK, title string, description text nullable, severity string,
+status string (open/in_progress/resolved), created_at datetime_immutable, updated_at nullable,
+alert_ids json array, ai_remediation json nullable, timeline json nullable
 
-CI/CD: Write .github/workflows/ci.yml that on pull_request runs:
-  - ruff linting
-  - pytest with a real postgres and redis test service (not mocks)
-Write .github/workflows/cd.yml that on push to main builds the Docker images.
+Rule (table: rules): id uuid PK, name string, description text nullable, rule_type string,
+severity string, config json, enabled bool, created_at datetime_immutable
 
-Use async SQLAlchemy throughout. Use dependency injection (Depends) for DB sessions and Redis.
-Create an Alembic migration for all models.
-Add a startup event in main.py that: creates all tables if they don't exist, inserts the default
-MonitoringConfig row (id=1) if it doesn't exist.
+MonitoringConfig (table: monitoring_config): id int PK (always 1), monitored_interfaces json,
+monitored_subnets json, excluded_ips json, updated_at datetime_immutable nullable
 
-Write pytest tests for:
-- DB connection and table creation
-- GET /api/config (returns default)
-- PUT /api/config with valid data
-- PUT /api/config with invalid CIDR (expects 422)
-- WebSocket connection
+REDIS CHANNELS (published by Python services — you SUBSCRIBE and broadcast via WebSocket):
+  traffic:events  →  broadcast as {"type": "traffic_event", "data": {...}}
+  alerts:new      →  broadcast as {"type": "new_alert", "data": {...}}
+  alerts:updated  →  broadcast as {"type": "alert_updated", "data": {...}}
 
-Use httpx.AsyncClient and pytest-asyncio for all tests.
+IMPLEMENT:
+
+1. All five Doctrine entity classes with ORM attributes
+2. Doctrine migrations for all five tables
+3. A DataFixture that inserts MonitoringConfig id=1 with defaults if it does not exist
+
+4. REST controllers returning JSON, all list endpoints return:
+   {"items":[...], "total": int, "page": int, "limit": int, "pages": int}
+
+   AlertController:
+   - GET /api/alerts — filterable by status, severity, rule_id, from, to. Include nested
+     triggering_event data in each alert response.
+   - GET /api/alerts/{id} — 404 if not found
+   - PATCH /api/alerts/{id} — update status only, 422 on invalid status value
+   - GET /api/alerts/export?format=csv|pdf — apply same filters as list endpoint.
+     CSV uses league/csv. PDF uses dompdf with a table showing id,rule_name,severity,timestamp,status.
+
+   EventController:
+   - GET /api/events — filterable by src_ip, dst_ip, protocol, port (matches src OR dst),
+     direction, from, to
+   - GET /api/events/{id} — 404 if not found
+   - GET /api/stats?range=15m|1h|6h|24h|7d — aggregate queries using Doctrine QueryBuilder:
+     top 10 source IPs by count, top 10 destination IPs, top 10 ports with protocol,
+     protocol breakdown counts, total events, total bytes, events per minute,
+     inbound/outbound/internal counts
+
+   IncidentController:
+   - POST /api/incidents — body: {title, alert_ids[]}. Derive severity = max of all alert severities.
+     Returns 201.
+   - GET /api/incidents — paginated list ordered by created_at DESC
+   - GET /api/incidents/{id} — 404 if not found
+   - PATCH /api/incidents/{id} — update status only
+
+   RuleController:
+   - GET /api/rules
+   - POST /api/rules
+   - PUT /api/rules/{id}
+   - DELETE /api/rules/{id} — soft delete: set enabled=false, return 204
+
+   ConfigController:
+   - GET /api/config
+   - PUT /api/config — validate each subnet in monitored_subnets using inet_pton(),
+     return 422 with {"field": "monitored_subnets", "error": "Invalid CIDR: ..."} on failure
+
+5. WebSocketServeCommand (src/Command/WebSocketServeCommand.php):
+   Command name: app:websocket:serve
+   - Creates a Ratchet WsServer running on port 8080
+   - Uses predis to subscribe to channels: traffic:events, alerts:new, alerts:updated
+   - On each Redis message: decodes JSON, wraps as {"type": "...", "data": {...}},
+     broadcasts to ALL currently connected WebSocket clients
+   - Tracks connected clients in an SplObjectStorage
+   - Handles onOpen, onClose, onError gracefully
+
+6. docker-compose.yml with all 7 services as specified (backend ports 8000+8080,
+   capture with network_mode:host and cap_add NET_RAW/NET_ADMIN, ollama with volume)
+
+7. Makefile: start, stop, logs, migrate, test targets
+
+8. .github/workflows/ci.yml: runs on PR to main, uses real postgres+redis services,
+   runs composer install + doctrine migrations + phpunit for backend,
+   npm ci + npm test for frontend
+
+9. .github/workflows/cd.yml: runs on push to main, builds backend and frontend Docker images
+
+10. PHPUnit tests in backend/tests/:
+    - GET /api/config returns default config
+    - PUT /api/config with valid data updates it
+    - PUT /api/config with invalid CIDR returns 422
+    - GET /api/alerts returns paginated response
+    - PATCH /api/alerts/{id} with valid status updates it
+    - PATCH /api/alerts/{id} with invalid status returns 422
 ```

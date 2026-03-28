@@ -1,190 +1,116 @@
-# Teammate 3 — Rule Engine & Alert Management
+# Teammate 3 — Rule Engine & Alert Management (Python)
 
 ## Role Overview
 
-You are the detection brain of the SIEM. You subscribe to the real-time stream of network events
-from Redis, evaluate every event against a set of configurable rules, and fire alerts when
-something suspicious is detected. You also own the full alert lifecycle: listing, filtering,
-acknowledging, marking false positives, and exporting reports.
+You run as a standalone Python service in `services/rules/`. You subscribe to the Redis
+`traffic:events` channel, evaluate every event against detection rules, and INSERT alerts
+into the shared PostgreSQL database when a rule threshold is exceeded. You also publish new
+alerts to Redis so the WebSocket broadcaster delivers them to the browser instantly.
 
-You are the component that turns raw network traffic into actionable security intelligence.
+The REST API for alerts and rules is implemented by Teammate 1 (Symfony). You only write
+to the database and publish to Redis — you do not expose any HTTP endpoints.
 
 ---
 
 ## User Stories Owned
 
-| Story | Description |
-|---|---|
-| US-02 | Instant alerts when a threat is detected |
-| US-03 | List of all alerts with severity and timestamp |
-| US-08 | Mark an alert as a false positive |
-| US-09 | Export alerts to CSV/PDF |
-| US-10 | Set custom threshold rules (e.g. >500 req/min = alert) |
+| Story | Your role | API (Teammate 1) |
+|---|---|---|
+| US-02 | Detect threat, INSERT Alert, publish to Redis | WebSocket broadcast |
+| US-03 | Write alert data to PostgreSQL | `GET /api/alerts` |
+| US-08 | Write alert data (status field updated by Symfony) | `PATCH /api/alerts/{id}` |
+| US-09 | Write alert data | `GET /api/alerts/export` |
+| US-10 | YAML rule definitions, custom threshold support | `POST /api/rules` |
 
 ---
 
-## Context — Why This Component Exists
+## Tech Stack
 
-### Why a rule engine?
-Network events are just data. The rule engine is what gives them meaning. A rule says:
-"if source IP X makes more than 20 connections to different ports within 60 seconds → that's a
-port scan → fire a high-severity alert." Without rules, the SIEM is just a packet logger.
+| Tool | Purpose |
+|---|---|
+| Python 3.11 | Language |
+| redis-py | Subscribe to `traffic:events`, publish to `alerts:new` |
+| psycopg2 | INSERT alerts into PostgreSQL |
+| PyYAML | Load default rule definitions |
+| pytest | Tests |
 
-### Why subscribe to Redis instead of polling PostgreSQL?
-The rule engine needs to react in real-time — ideally within milliseconds of a packet being
-captured. Polling PostgreSQL every second would miss bursts and add unnecessary load.
-Redis pub/sub delivers each event as it arrives.
+---
 
-### Why keep a sliding window in memory?
-Threshold rules (e.g. "more than 10 failed SSH attempts in 30 seconds") require tracking
-counts over time. You maintain an in-memory dictionary keyed by (rule_id, src_ip) with
-timestamps of recent matching events. This is much faster than querying the DB on every packet.
+## Context
 
-### Why does the alert get published back to Redis after creation?
-The AI agent (P4) subscribes to `alerts:new` and runs analysis asynchronously. You fire the
-alert first (so it appears in the UI immediately), then P4 enriches it with AI analysis later.
+### Why Python for the rule engine?
+The rule engine runs a continuous event loop subscribing to Redis. Python's async capabilities
+and the scapy ecosystem make it the natural fit. Symfony handles the HTTP layer; Python handles
+the real-time stream processing.
+
+### Why does the rule engine write directly to PostgreSQL?
+The rule engine creates alerts at high frequency (potentially many per second under attack).
+Going through the Symfony API would add latency and create a bottleneck. Direct psycopg2
+inserts are faster and simpler.
+
+### Why publish to Redis after inserting to PostgreSQL?
+Teammate 1's Ratchet WebSocket server subscribes to `alerts:new`. When you publish, Ratchet
+immediately pushes the alert to all connected browsers — this is what makes US-02 (instant
+alerts) work. If you only wrote to PostgreSQL, the browser would need to poll.
+
+### What are default rules?
+You ship 5 built-in detection rules as a YAML file. At startup, you INSERT any rules that
+don't already exist in the `rules` PostgreSQL table. This seeds the database so Teammate 1's
+`GET /api/rules` returns something useful on first run.
 
 ---
 
 ## Architecture Position
 
 ```
-Redis "traffic:events"
-        │  (every network event, in real-time)
+Redis "traffic:events"  ← published by Teammate 2 capture service
+        │
         ▼
-[Rule Engine — your subscriber]
+[services/rules/]  ← subscribes, evaluates rules, sliding window in memory
         │
-        ├── checks each event against all enabled rules
-        │
-        ├── if rule match:
-        │       ├── creates Alert row in PostgreSQL
-        │       └── publishes to Redis "alerts:new"  → P4 AI Agent subscribes
-        │
-        └── [in-memory sliding window for threshold rules]
-
-[Alert API — your HTTP endpoints]
-        │
-        ├── GET  /api/alerts        → P5 frontend (list/filter)
-        ├── GET  /api/alerts/{id}   → P5 frontend (detail view)
-        ├── PATCH /api/alerts/{id}  → P5 frontend (acknowledge, false positive, resolve)
-        ├── GET  /api/alerts/export → P5 frontend (download CSV or PDF)
-        ├── GET  /api/rules         → P5 frontend (list rules)
-        ├── POST /api/rules         → P5 frontend (create custom rule, US-10)
-        ├── PUT  /api/rules/{id}    → P5 frontend (update rule)
-        └── DELETE /api/rules/{id} → P5 frontend (delete rule)
+        ├── INSERT Alert into PostgreSQL
+        └── PUBLISH to Redis "alerts:new"
+                  │
+                  ├── Teammate 1 Ratchet WS server → browser (instant alert)
+                  └── Teammate 4 AI agent → enriches alert with analysis
 ```
 
 ---
 
-## What You Receive (Inputs)
+## File Structure
 
-1. **Redis messages** from channel `traffic:events` (produced by P2 capture service)
-2. **HTTP requests** from the frontend (P5) for alert management and rule CRUD
-
-**Example input event from Redis:**
-```json
-{
-  "id": "3f2a1b4c-8d9e-4f5a-b6c7-d8e9f0a1b2c3",
-  "timestamp": "2024-01-15T10:30:00.123456Z",
-  "src_ip": "192.168.1.100",
-  "dst_ip": "8.8.8.8",
-  "src_port": 54321,
-  "dst_port": 443,
-  "protocol": "TCP",
-  "bytes_sent": 1500,
-  "direction": "outbound",
-  "interface": "eth0",
-  "flags": "SYN"
-}
+```
+services/rules/
+├── engine.py           ← main loop: subscribe, evaluate, insert, publish
+├── loader.py           ← seeds default rules into PostgreSQL at startup
+├── default_rules.yaml  ← 5 built-in detection rules
+├── tests/
+│   └── test_rules.py
+├── requirements.txt
+└── Dockerfile
 ```
 
 ---
 
-## What You Produce (Outputs)
-
-### 1. Alert created in PostgreSQL
-
-```json
-{
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "rule_id": "port-scan-001",
-  "rule_name": "Port Scan Detection",
-  "severity": "high",
-  "timestamp": "2024-01-15T10:30:05Z",
-  "status": "open",
-  "triggering_event_id": "3f2a1b4c-8d9e-4f5a-b6c7-d8e9f0a1b2c3",
-  "related_event_ids": [
-    "3f2a1b4c-...", "4a3b2c1d-...", "5b4c3d2e-..."
-  ],
-  "ai_analysis": null,
-  "incident_id": null
-}
-```
-
-### 2. Redis message on channel `alerts:new`
-
-Same structure as above. P4 (AI agents) subscribes to this channel.
-
-### 3. GET /api/alerts response
-
-```json
-{
-  "items": [
-    {
-      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "rule_id": "port-scan-001",
-      "rule_name": "Port Scan Detection",
-      "severity": "high",
-      "timestamp": "2024-01-15T10:30:05Z",
-      "status": "open",
-      "triggering_event": {
-        "src_ip": "192.168.1.100",
-        "dst_ip": "8.8.8.8",
-        "protocol": "TCP",
-        "dst_port": 443
-      },
-      "ai_analysis": null
-    }
-  ],
-  "total": 42,
-  "page": 1,
-  "limit": 20,
-  "pages": 3
-}
-```
-
-### 4. Export CSV example
-
-```
-id,rule_name,severity,timestamp,status,src_ip,dst_ip,protocol,dst_port
-a1b2c3d4,Port Scan Detection,high,2024-01-15T10:30:05Z,open,192.168.1.100,8.8.8.8,TCP,443
-b2c3d4e5,SSH Brute Force,critical,2024-01-15T10:31:00Z,acknowledged,10.0.0.5,192.168.1.10,TCP,22
-```
-
----
-
-## Rule System — Full Specification
-
-### Rule YAML File (default rules, loaded at startup)
-
-Location: `backend/app/rules/default_rules.yaml`
+## Default Rules — YAML Specification
 
 ```yaml
+# services/rules/default_rules.yaml
 rules:
   - id: "port-scan-001"
     name: "Port Scan Detection"
-    description: "Detects rapid connection attempts to multiple ports from a single source IP"
+    description: "Detects rapid connections to many different ports from a single IP"
     type: "threshold"
     severity: "high"
     enabled: true
     config:
-      metric: "unique_dst_ports"      # count distinct destination ports from src_ip
+      metric: "unique_dst_ports"
       window_seconds: 60
-      threshold: 20                   # more than 20 unique dst ports in 60s = alert
+      threshold: 20
 
   - id: "ssh-bruteforce-001"
     name: "SSH Brute Force"
-    description: "Multiple TCP SYN to port 22 from same source"
+    description: "Multiple TCP SYN packets to port 22 from the same source"
     type: "threshold"
     severity: "critical"
     enabled: true
@@ -198,18 +124,18 @@ rules:
 
   - id: "high-traffic-001"
     name: "High Traffic Volume"
-    description: "Single IP sending unusually high traffic"
+    description: "Single IP sending unusually high number of packets"
     type: "threshold"
     severity: "medium"
     enabled: true
     config:
       metric: "event_count"
       window_seconds: 60
-      threshold: 500                  # US-10: configurable by user
+      threshold: 500
 
   - id: "icmp-flood-001"
     name: "ICMP Flood"
-    description: "Excessive ICMP packets (potential ping flood)"
+    description: "Excessive ICMP packets from a single source"
     type: "threshold"
     severity: "medium"
     enabled: true
@@ -221,7 +147,7 @@ rules:
 
   - id: "dns-unusual-001"
     name: "Unusual DNS Activity"
-    description: "High volume of DNS queries from single host"
+    description: "High volume of DNS queries from a single host"
     type: "threshold"
     severity: "low"
     enabled: true
@@ -233,251 +159,184 @@ rules:
       threshold: 200
 ```
 
-### Rule Types
+---
 
-**threshold**: Count events matching optional filters within a sliding time window.
-When count exceeds `threshold`, fire an alert with all matching event IDs as `related_event_ids`.
-
-Supported metrics:
-- `event_count`: count total matching events
-- `unique_dst_ports`: count distinct destination ports (for port scan detection)
-- `unique_dst_ips`: count distinct destination IPs
-
-Optional filters (all are AND conditions):
-- `filter_dst_port`: only count events to this port
-- `filter_src_port`: only count events from this port
-- `filter_protocol`: "TCP", "UDP", "ICMP"
-- `filter_flags`: TCP flag string match
-
-### Sliding Window Implementation
+## Sliding Window Implementation
 
 ```python
-# In-memory structure:
-windows = {}
-# Key: (rule_id, src_ip)   Value: deque of (timestamp, event_id, relevant_value)
+from collections import deque
+from datetime import datetime
 
-def check_rule(rule: dict, event: dict) -> bool:
+# In-memory state — keyed by (rule_id, src_ip)
+windows = {}   # (rule_id, src_ip) -> deque of (timestamp, event_id, metric_value)
+last_alert = {}  # (rule_id, src_ip) -> datetime of last alert fired
+
+def evaluate_rule(rule: dict, event: dict) -> tuple[bool, list[str]]:
+    """
+    Returns (should_alert, list_of_related_event_ids).
+    """
     key = (rule["id"], event["src_ip"])
     now = datetime.utcnow()
-    window_seconds = rule["config"]["window_seconds"]
-    threshold = rule["config"]["threshold"]
+    window_secs = rule["config"]["window_seconds"]
 
-    # Remove entries older than the window
+    # Skip if we already alerted for this rule+src_ip in the last 60 seconds
+    if key in last_alert and (now - last_alert[key]).seconds < 60:
+        return False, []
+
     if key not in windows:
         windows[key] = deque()
-    while windows[key] and (now - windows[key][0][0]).seconds > window_seconds:
+
+    # Expire old entries
+    while windows[key] and (now - windows[key][0][0]).total_seconds() > window_secs:
         windows[key].popleft()
 
-    # Add current event
-    windows[key].append((now, event["id"], get_metric_value(rule, event)))
+    # Check optional filters
+    cfg = rule["config"]
+    if "filter_dst_port" in cfg and event.get("dst_port") != cfg["filter_dst_port"]:
+        return False, []
+    if "filter_protocol" in cfg and event.get("protocol") != cfg["filter_protocol"]:
+        return False, []
+    if "filter_flags" in cfg and event.get("flags") != cfg["filter_flags"]:
+        return False, []
 
-    # Check if threshold exceeded
-    if rule["config"]["metric"] == "unique_dst_ports":
-        unique_values = len(set(entry[2] for entry in windows[key]))
-        return unique_values >= threshold
+    # Add current event
+    metric_value = event.get("dst_port") if cfg["metric"] == "unique_dst_ports" else 1
+    windows[key].append((now, event["id"], metric_value))
+
+    # Evaluate threshold
+    if cfg["metric"] == "unique_dst_ports":
+        count = len(set(entry[2] for entry in windows[key]))
     else:
-        return len(windows[key]) >= threshold
+        count = len(windows[key])
+
+    if count >= cfg["threshold"]:
+        last_alert[key] = now
+        related_ids = [entry[1] for entry in windows[key]]
+        return True, related_ids
+
+    return False, []
 ```
 
 ---
 
-## API Endpoints — Full Specification
+## Alert INSERT — PostgreSQL Schema
 
-### GET /api/alerts
-
-| Parameter | Type | Example | Description |
-|---|---|---|---|
-| `status` | string | `open` | "open", "acknowledged", "false_positive", "resolved" |
-| `severity` | string | `high` | "low", "medium", "high", "critical" |
-| `rule_id` | string | `port-scan-001` | Filter by specific rule |
-| `from` | ISO datetime | `2024-01-15T00:00:00Z` | Start of time range |
-| `to` | ISO datetime | `2024-01-15T23:59:59Z` | End of time range |
-| `page` | int | `1` | Page number |
-| `limit` | int | `20` | Items per page (max 100) |
-
-### PATCH /api/alerts/{id}
-
-Updates alert status.
-
-**Request body:**
-```json
-{ "status": "false_positive" }
+```python
+# psycopg2 insert when rule fires
+INSERT INTO alerts
+  (id, rule_id, rule_name, severity, timestamp, status,
+   triggering_event_id, related_event_ids, ai_analysis, incident_id)
+VALUES
+  (%s, %s, %s, %s, NOW(), 'open', %s, %s::jsonb, NULL, NULL)
 ```
-Valid statuses: `"acknowledged"`, `"false_positive"`, `"resolved"`
 
-**Response (200):** Full alert object with updated status.
-**Response (404):** Alert not found.
-**Response (422):** Invalid status value.
+---
 
-### GET /api/alerts/export
+## Alert Published to Redis — `alerts:new`
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `format` | string | `csv` | "csv" or "pdf" |
-| `status` | string | optional | Filter by status |
-| `severity` | string | optional | Filter by severity |
-| `from` | ISO datetime | optional | Start of time range |
-| `to` | ISO datetime | optional | End of time range |
+Same structure as what's in PostgreSQL, serialized as JSON:
 
-**CSV response:** Content-Type: `text/csv`, Content-Disposition: `attachment; filename=alerts_export_20240115.csv`
-
-**PDF response:** Use `reportlab` library. Include: title with date range, summary table (total alerts, by severity, by status), detailed table with columns (timestamp, rule, severity, status, src_ip, dst_ip).
-
-### GET /api/rules
-Returns all rules (from DB, including user-created ones).
-
-### POST /api/rules (US-10)
-
-**Request body:**
 ```json
 {
-  "name": "Very High Traffic",
-  "description": "Alert when a single IP sends more than 500 requests per minute",
-  "rule_type": "threshold",
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "rule_id": "port-scan-001",
+  "rule_name": "Port Scan Detection",
   "severity": "high",
-  "config": {
-    "metric": "event_count",
-    "window_seconds": 60,
-    "threshold": 500
-  }
+  "timestamp": "2024-01-15T10:30:05Z",
+  "status": "open",
+  "triggering_event_id": "3f2a1b4c-...",
+  "related_event_ids": ["3f2a1b4c-...", "4a3b2c1d-..."],
+  "ai_analysis": null,
+  "incident_id": null
 }
 ```
 
-**Response (201):** Full rule object with generated `id` and `created_at`.
-
-### PUT /api/rules/{id}
-Full update of a rule. Same body as POST. Returns updated rule.
-
-### DELETE /api/rules/{id}
-Returns 204. Soft-delete preferred (set `enabled=false`) so historical alerts still reference valid rules.
-
 ---
 
-## File Structure You Own
+## Rule Loading at Startup
 
+```python
+# loader.py — called once at startup
+# For each rule in default_rules.yaml:
+#   SELECT id FROM rules WHERE id = %s
+#   If not found: INSERT INTO rules (...) VALUES (...)
+# This ensures default rules are seeded once and user edits via the UI are preserved.
 ```
-backend/
-└── app/
-    ├── rules/
-    │   ├── __init__.py
-    │   ├── engine.py            ← subscribes to Redis, evaluates rules, creates alerts
-    │   ├── default_rules.yaml   ← built-in detection rules
-    │   └── loader.py            ← loads YAML rules into DB at startup
-    ├── services/
-    │   └── exporter.py          ← CSV and PDF export logic
-    └── api/
-        ├── alerts.py            ← all alert endpoints
-        └── rules.py             ← all rule CRUD endpoints
-```
-
----
-
-## Startup Behavior
-
-At application startup, `loader.py` should:
-1. Read `default_rules.yaml`
-2. For each rule in the YAML, check if it already exists in the DB (by `rule_id`)
-3. If not → insert it
-4. If yes → skip (don't overwrite user modifications)
-
-This means default rules are seeded once and users can then modify them via the API.
 
 ---
 
 ## Testing Requirements
 
-Write tests in `backend/tests/test_rules_alerts.py`:
+Write tests in `services/rules/tests/test_rules.py`:
 
-1. Test port scan rule fires correctly when 20+ unique ports in 60s
-2. Test SSH brute force rule fires at threshold 10
-3. Test rule does NOT fire below threshold
-4. Test sliding window correctly expires old events
-5. Test GET /api/alerts returns paginated results
-6. Test GET /api/alerts with `severity=critical` filter
-7. Test PATCH /api/alerts/{id} updates status to "false_positive"
-8. Test PATCH /api/alerts/{id} with invalid status returns 422
-9. Test GET /api/alerts/export?format=csv returns valid CSV with correct headers
-10. Test POST /api/rules creates a new rule and it appears in GET /api/rules
+1. Port scan rule fires correctly at 20 unique ports
+2. Port scan rule does NOT fire at 19 unique ports
+3. SSH brute force rule fires at 10 SYN packets to port 22
+4. SSH brute force rule does NOT fire for non-SYN packets
+5. Rule does NOT fire again within 60 seconds of last alert (duplicate prevention)
+6. Sliding window correctly expires events older than `window_seconds`
+7. `filter_dst_port` correctly filters out non-matching events
+8. `filter_protocol` correctly filters out non-matching protocols
+9. Loader inserts default rules only when they don't exist
 
 ---
 
 ## AI Prompt — Give This Exactly to Claude
 
 ```
-You are implementing the rule engine and alert management system for a SIEM tool.
-The project uses Python, FastAPI, SQLAlchemy (async), Redis (async), PostgreSQL, and reportlab.
+You are implementing the rule engine service for a SIEM tool.
+This is a standalone Python service in services/rules/.
+It uses: redis-py (async) for pub/sub, psycopg2 for PostgreSQL writes, PyYAML for rules.
 
-The following SQLAlchemy models are already defined by a teammate:
+The PostgreSQL tables already exist (created by a Symfony migration):
+  alerts: id uuid, rule_id varchar, rule_name varchar, severity varchar, timestamp timestamptz,
+          status varchar default 'open', triggering_event_id uuid nullable,
+          related_event_ids jsonb, ai_analysis jsonb nullable, incident_id uuid nullable
+  rules:  id uuid, name varchar, description text, rule_type varchar, severity varchar,
+          config jsonb, enabled bool, created_at timestamptz
 
-Alert model fields:
-  id (UUID PK), rule_id (String), rule_name (String), severity (String),
-  timestamp (DateTime), status (String: "open"/"acknowledged"/"false_positive"/"resolved"),
-  triggering_event_id (UUID FK → network_events), related_event_ids (JSON list of UUID strings),
-  ai_analysis (JSON nullable), incident_id (UUID FK nullable)
+Redis channels:
+  Subscribe from: "traffic:events"
+  Publish to:     "alerts:new"
 
-NetworkEvent model fields:
-  id (UUID PK), timestamp, src_ip, dst_ip, src_port, dst_port, protocol, bytes_sent,
-  direction, interface, flags
+Implement:
 
-Rule model fields:
-  id (UUID PK), name, description, rule_type, severity, config (JSON), enabled (bool), created_at
+1. services/rules/default_rules.yaml
+   Five rules: port-scan-001 (unique_dst_ports >= 20 in 60s, high),
+   ssh-bruteforce-001 (event_count TCP SYN port 22 >= 10 in 30s, critical),
+   high-traffic-001 (event_count >= 500 in 60s, medium),
+   icmp-flood-001 (event_count ICMP >= 100 in 10s, medium),
+   dns-unusual-001 (event_count UDP port 53 >= 200 in 60s, low)
 
-Redis client (already implemented) has:
-  publish(channel: str, message: dict) → publishes JSON to channel
-  subscribe(channel: str) → async generator yielding dicts
-  Channels: subscribe from "traffic:events", publish to "alerts:new"
+2. services/rules/loader.py
+   load_default_rules(conn): reads YAML, inserts each rule only if id not already in rules table.
+   Generates UUID for id, sets created_at=NOW(), enabled=true.
 
-Your task is to implement:
+3. services/rules/engine.py
+   - Reads env vars: DATABASE_URL, REDIS_URL
+   - At startup: call load_default_rules(), then load all enabled rules from DB into memory
+   - Subscribe to Redis "traffic:events" using redis-py async
+   - For each event received:
+     a. Parse JSON
+     b. For each enabled rule: call evaluate_rule(rule, event)
+     c. If returns (True, related_ids): INSERT alert into PostgreSQL, PUBLISH to "alerts:new"
+   - Sliding window: in-memory dict keyed by (rule_id, src_ip)
+     using deque of (timestamp, event_id, metric_value)
+   - Supports metrics: "event_count" and "unique_dst_ports"
+   - Supports filters: filter_dst_port, filter_protocol, filter_flags (all optional, AND logic)
+   - Duplicate prevention: do not fire same rule for same src_ip within 60s of last alert
+   - Reload rules from DB every 5 minutes (to pick up rules created via the API)
 
-1. backend/app/rules/default_rules.yaml
-   Define 5 detection rules with these IDs:
-   "port-scan-001" (unique_dst_ports >= 20 in 60s, severity: high)
-   "ssh-bruteforce-001" (event_count for TCP SYN to port 22 >= 10 in 30s, severity: critical)
-   "high-traffic-001" (event_count >= 500 in 60s, severity: medium)
-   "icmp-flood-001" (event_count for ICMP >= 100 in 10s, severity: medium)
-   "dns-unusual-001" (event_count for UDP port 53 >= 200 in 60s, severity: low)
+4. services/rules/requirements.txt: redis, psycopg2-binary, pyyaml, pytest, pytest-asyncio
 
-2. backend/app/rules/loader.py
-   load_default_rules(db: AsyncSession) → reads YAML, inserts rules not already in DB
+5. services/rules/Dockerfile: FROM python:3.11-slim, install requirements, run engine.py
 
-3. backend/app/rules/engine.py
-   - Async function run_rule_engine() that:
-     a. Subscribes to Redis "traffic:events"
-     b. For each event received, evaluates ALL enabled rules from the DB
-     c. Uses a deque-based in-memory sliding window keyed by (rule_id, src_ip)
-     d. Supports metrics: "event_count" and "unique_dst_ports"
-     e. Supports optional filters: filter_dst_port, filter_protocol, filter_flags
-     f. When threshold exceeded: creates Alert in DB with all related_event_ids,
-        publishes the alert to Redis "alerts:new"
-     g. Prevents duplicate alerts: don't fire the same rule for the same src_ip within 60s
-        of the last alert for that combination
-
-4. backend/app/api/alerts.py
-   - GET /api/alerts (paginated, filterable by status, severity, rule_id, from, to)
-     Response: {"items": [...], "total": int, "page": int, "limit": int, "pages": int}
-     Include triggering_event data nested in each alert (join with network_events)
-   - GET /api/alerts/{id} → single alert with full triggering_event nested, 404 if not found
-   - PATCH /api/alerts/{id} → update status only, validate status enum, 422 on invalid
-   - GET /api/alerts/export?format=csv|pdf&status=&severity=&from=&to=
-     CSV: headers = id,rule_name,severity,timestamp,status,src_ip,dst_ip,protocol,dst_port
-     PDF: use reportlab to build a table with title "SIEM Alert Export — {date_range}"
-
-5. backend/app/api/rules.py
-   - GET /api/rules → list all rules (enabled and disabled)
-   - POST /api/rules → create rule, validate rule_type is "threshold"
-   - PUT /api/rules/{id} → full update
-   - DELETE /api/rules/{id} → soft delete (set enabled=False), 404 if not found
-
-6. backend/app/services/exporter.py
-   - export_to_csv(alerts: list[Alert]) → returns str (CSV content)
-   - export_to_pdf(alerts: list[Alert], date_range: str) → returns bytes (PDF content)
-     Use reportlab.platypus with a SimpleDocTemplate and a Table.
-
-7. backend/tests/test_rules_alerts.py
-   Tests: sliding window threshold behavior (fires at threshold, not before),
-   rule filters (only counts matching protocol/port), duplicate alert prevention,
-   GET /api/alerts pagination, PATCH status update, CSV export format.
-
-Call run_rule_engine() as a background task in app/main.py startup event.
-Register alerts and rules routers with prefix="/api".
+6. services/rules/tests/test_rules.py
+   Unit tests using pytest (mock Redis and psycopg2):
+   - Port scan fires at threshold, not below
+   - SSH brute force fires correctly with filters
+   - Duplicate prevention blocks second alert within 60s
+   - Sliding window expires old entries
+   - filter_dst_port excludes non-matching events
+   - loader inserts rules not in DB, skips existing ones
 ```

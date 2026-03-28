@@ -1,57 +1,60 @@
-# Teammate 4 — AI Agents
+# Teammate 4 — AI Agents (Python)
 
 ## Role Overview
 
-You implement the two AI agents that are the core differentiator of this SIEM tool. Without you,
-the tool is just a packet logger with rules. With you, every alert gets an expert security
-analysis and every incident gets a concrete remediation plan — generated automatically by a
-local LLM running on the user's machine.
-
-Your work directly satisfies the mandatory project requirement: **minimum 2 AI agents
-integrated into the functionality**.
-
-You own the Ollama container configuration, both agent implementations, the agent evaluation
-framework, and the API endpoints that trigger/retrieve agent results.
+You run as a standalone Python service in `services/agents/`. You implement the two AI agents
+that are the mandatory project requirement. You subscribe to Redis `alerts:new`, call a local
+Ollama LLM, and write the AI analysis back to PostgreSQL. You also run analysis when incidents
+are created — but since incidents are created via the Symfony API (Teammate 1), you poll
+PostgreSQL for new incidents that have no AI analysis yet.
 
 ---
 
 ## User Stories Owned
 
-| Story | Description |
-|---|---|
-| US-04 | View the AI explanation for why something was flagged |
-| US-11 | See a timeline view of an incident (AI reconstructs and explains the sequence) |
-| US-12 | Receive AI-generated remediation suggestions for an incident |
+| Story | Your role | API (Teammate 1) |
+|---|---|---|
+| US-04 | Write `ai_analysis` JSON to Alert row | `GET /api/alerts/{id}` returns it |
+| US-11 | Write `timeline` JSON to Incident row | `GET /api/incidents/{id}` returns it |
+| US-12 | Write `ai_remediation` JSON to Incident row | `GET /api/incidents/{id}` returns it |
 
 ---
 
-## Context — Why Each Piece Exists
+## Tech Stack
 
-### Why Ollama?
-Ollama is a local LLM server. It runs open-source language models (like Llama 3.2 3B) directly
-on the user's machine, with no internet connection needed after the initial model download.
-This satisfies the project requirement for "small language models running locally."
-The model WILL sometimes hallucinate — that is acceptable per the project requirements.
+| Tool | Purpose |
+|---|---|
+| Python 3.11 | Language |
+| redis-py | Subscribe to `alerts:new`, publish to `alerts:updated` |
+| psycopg2 | Read alerts/events/incidents, write AI analysis results |
+| httpx | Call Ollama LLM API |
+| pytest | Unit tests + agent evals |
+
+---
+
+## Context
+
+### Why local Ollama instead of OpenAI?
+The project requirement specifies small language models running locally. Ollama serves
+open-source models (like `llama3.2:3b`) on the user's machine with no internet required
+after the initial model download. The models will sometimes hallucinate — this is acceptable
+per the project requirements.
 
 ### Why two separate agents?
-- **Agent 1 (Threat Analyst)** reacts to individual alerts. It is event-driven: triggered
-  immediately when a new alert is created. It analyzes ONE alert in isolation.
-- **Agent 2 (Incident Response)** reacts to incidents, which are collections of related alerts.
-  It thinks holistically: "given all these alerts together, what attack pattern is occurring,
-  what is the full timeline, and what should we do?"
+Agent 1 (Threat Analyst) reacts to individual alerts — triggered immediately when a new alert
+is created. It analyzes ONE alert in isolation.
+Agent 2 (Incident Response) reacts to incidents (groups of related alerts) — triggered when
+a new incident appears without AI analysis. It thinks holistically across multiple alerts.
 
-The separation reflects how real SOC (Security Operations Center) analysts work:
-a Tier 1 analyst triages individual alerts, a Tier 2 analyst investigates incidents.
+### How does Agent 2 know when a new incident is created?
+The Symfony API creates incidents (POST /api/incidents). Agent 2 polls PostgreSQL every 10
+seconds for incidents where `ai_remediation IS NULL`. When it finds one, it runs analysis.
+This is simpler than a dedicated Redis channel for incidents.
 
-### Why subscribe to Redis instead of being called directly?
-Both agents run asynchronously and must not block the API response. When P3 creates an alert,
-the API immediately returns the alert to the frontend (status: open, ai_analysis: null).
-Your agent then enriches it in the background. The frontend gets the AI analysis update via
-WebSocket when it's ready.
-
-### Why store results in PostgreSQL rather than returning them directly?
-Results must persist. If a user refreshes the page, the AI analysis must still be there.
-You write to the DB; the frontend fetches via the existing alert/incident API endpoints.
+### Why publish `alerts:updated` after enriching an alert?
+Teammate 1's Ratchet WebSocket server subscribes to `alerts:updated`. When you publish, the
+browser immediately updates the AI analysis panel from a spinner to real content. Without this,
+the user would need to refresh manually.
 
 ---
 
@@ -59,132 +62,193 @@ You write to the DB; the frontend fetches via the existing alert/incident API en
 
 ```
 Redis "alerts:new"
-        │  (new alert fired by P3 rule engine)
+        │
         ▼
 [Agent 1 — Threat Analyst]
         │
-        ├── fetches alert + related events from PostgreSQL
-        ├── builds prompt with security context
-        ├── POST → http://ollama:11434/api/generate
-        ├── parses LLM response as JSON
-        ├── writes ai_analysis to Alert row in PostgreSQL
-        └── publishes updated alert to Redis "alerts:updated"
-                │
-                └──► P1 WebSocket handler → P5 frontend gets live update
+        ├── SELECT alert + related events from PostgreSQL
+        ├── POST http://ollama:11434/api/generate
+        ├── UPDATE alerts SET ai_analysis WHERE id=...
+        └── PUBLISH to Redis "alerts:updated"
+                  └── Teammate 1 Ratchet WS → browser live update
 
-
-[Incident API endpoint — POST /api/incidents] ← P5 frontend triggers
-        │
+PostgreSQL incidents WHERE ai_remediation IS NULL
+        │ (polled every 10 seconds)
         ▼
 [Agent 2 — Incident Response]
         │
-        ├── fetches all alerts in the incident + their events from PostgreSQL
-        ├── builds chronological timeline
-        ├── builds prompt with full incident context
-        ├── POST → http://ollama:11434/api/generate
-        ├── parses LLM response as JSON
-        ├── writes ai_remediation + timeline to Incident row in PostgreSQL
-        └── returns enriched incident to frontend
+        ├── SELECT all alerts + events for the incident
+        ├── POST http://ollama:11434/api/generate
+        └── UPDATE incidents SET ai_remediation, timeline WHERE id=...
 ```
 
 ---
 
-## What You Receive (Inputs)
+## File Structure
 
-### Agent 1 input (from Redis + PostgreSQL)
-
-When you receive a message on `alerts:new`, the message contains the full alert. You then
-fetch additional context from the database.
-
-**Redis message format (same as Alert schema):**
-```json
-{
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "rule_id": "port-scan-001",
-  "rule_name": "Port Scan Detection",
-  "severity": "high",
-  "timestamp": "2024-01-15T10:30:05Z",
-  "status": "open",
-  "triggering_event_id": "3f2a1b4c-8d9e-4f5a-b6c7-d8e9f0a1b2c3",
-  "related_event_ids": ["3f2a1b4c-...", "4a3b2c1d-...", "..."],
-  "ai_analysis": null,
-  "incident_id": null
-}
 ```
-
-**Context you fetch from DB before calling Ollama:**
-- The triggering NetworkEvent (src_ip, dst_ip, protocol, port, flags, timestamp)
-- Up to 10 of the related NetworkEvents (to show the pattern)
-- The last 5 alerts for the same src_ip (to check for repeat offender)
-
-### Agent 2 input (from HTTP request + PostgreSQL)
-
-Triggered by POST /api/incidents from the frontend. Request body:
-```json
-{
-  "title": "Port scan followed by SSH brute force from 192.168.1.100",
-  "alert_ids": [
-    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "b2c3d4e5-f6a7-8901-bcde-f12345678901"
-  ]
-}
+services/agents/
+├── agent1_threat_analyst.py  ← subscribes to alerts:new, enriches alerts
+├── agent2_incident_response.py ← polls for new incidents, generates remediation
+├── ollama_client.py          ← HTTP client for Ollama API
+├── tests/
+│   ├── test_agents.py        ← unit tests with mocked Ollama
+│   └── test_agent_evals.py   ← quality evaluation tests
+├── requirements.txt
+└── Dockerfile
 ```
-
-You fetch all specified alerts + their events from the DB, sort them by timestamp, and build
-the full incident context.
 
 ---
 
-## What You Produce (Outputs)
+## Ollama Client
 
-### Agent 1 Output — ai_analysis JSON stored in Alert
+```python
+# ollama_client.py
 
-This JSON is written to `Alert.ai_analysis` in PostgreSQL and forwarded to the frontend
-via the `alerts:updated` Redis channel.
+OLLAMA_URL = os.environ["OLLAMA_URL"]  # http://ollama:11434
+
+async def generate(prompt: str, model: str = "llama3.2:3b") -> str:
+    """Call Ollama and return raw text response. Raises on HTTP error."""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(f"{OLLAMA_URL}/api/generate", json={
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.3, "num_predict": 600}
+        })
+        return resp.json()["response"]
+
+async def generate_json(prompt: str, model: str = "llama3.2:3b") -> dict:
+    """Call generate(), parse response as JSON. Retry once on parse failure.
+    Return error dict if both attempts fail."""
+
+async def ensure_model_available(model: str = "llama3.2:3b") -> None:
+    """Pull the model if not already downloaded. Called at startup."""
+```
+
+---
+
+## Agent 1 — Threat Analyst
+
+**Trigger**: new message on Redis `alerts:new`
+
+**Steps:**
+1. Parse alert from Redis message
+2. `SELECT * FROM alerts WHERE id = %s` — fetch full alert row
+3. `SELECT * FROM network_events WHERE id = ANY(%s)` — fetch up to 10 related events
+4. `SELECT * FROM alerts WHERE triggering_event_id IN (SELECT id FROM network_events WHERE src_ip = %s) ORDER BY timestamp DESC LIMIT 5` — recent history from same IP
+5. Build prompt (see below)
+6. Call `ollama_client.generate_json(prompt)`
+7. Add `analyzed_at` timestamp to result
+8. `UPDATE alerts SET ai_analysis = %s::jsonb WHERE id = %s`
+9. `PUBLISH alerts:updated` with full updated alert JSON
+
+**On Ollama failure**: store `{"error": "Ollama unavailable", "analyzed_at": "..."}` in `ai_analysis`. Never crash.
+
+### Prompt Template
+
+```
+You are a cybersecurity expert analyzing a network security alert.
+Analyze the alert and respond ONLY with valid JSON.
+
+ALERT: {rule_name} | Severity: {severity} | Time: {timestamp}
+
+TRIGGERING EVENT:
+{src_ip} -> {dst_ip}:{dst_port} via {protocol} ({flags}), {bytes_sent} bytes, {direction}
+
+SAMPLE OF {related_count} RELATED EVENTS:
+{related_events_text}
+
+RECENT ALERTS FROM SAME SOURCE IP:
+{recent_alerts_text}
+
+Respond ONLY with this exact JSON:
+{{"threat_assessment": "2-3 sentence explanation",
+  "severity_justification": "why this severity is correct",
+  "mitre_tactic": "one of: Reconnaissance, Initial Access, Execution, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Lateral Movement, Collection, Command and Control, Exfiltration, Impact",
+  "mitre_technique": "T-number and name",
+  "confidence": 0.0 to 1.0,
+  "is_false_positive_likely": true or false,
+  "recommended_action": "specific immediate action",
+  "iocs": ["list of suspicious IPs or domains"]}}
+```
+
+### Expected Output (stored in `alerts.ai_analysis`)
 
 ```json
 {
-  "threat_assessment": "This is highly likely a real port scan attack. The source IP 192.168.1.100 contacted 34 different destination ports on 8.8.8.8 within 45 seconds. This matches the classic TCP SYN scan pattern used for network reconnaissance.",
-  "severity_justification": "Rated HIGH because: (1) systematic scanning of 34+ ports indicates active reconnaissance, (2) source is an internal IP which may indicate a compromised internal machine, (3) SYN-only flags with no SYN-ACK responses suggests stealth scanning.",
+  "threat_assessment": "This is highly likely a real port scan. The source IP 192.168.1.100 contacted 34 different ports in 45 seconds, matching a TCP SYN scan pattern used for reconnaissance.",
+  "severity_justification": "HIGH because systematic scanning of 34+ ports indicates active reconnaissance of an internal machine.",
   "mitre_tactic": "Reconnaissance",
   "mitre_technique": "T1046 - Network Service Discovery",
   "confidence": 0.87,
   "is_false_positive_likely": false,
-  "recommended_action": "Isolate 192.168.1.100 from network access immediately. Investigate what software initiated the scan. Check for malware infection on this host.",
+  "recommended_action": "Isolate 192.168.1.100 and investigate for malware.",
   "iocs": ["192.168.1.100"],
   "analyzed_at": "2024-01-15T10:30:08Z"
 }
 ```
 
-### Agent 2 Output — ai_remediation JSON stored in Incident
+---
+
+## Agent 2 — Incident Response
+
+**Trigger**: poll `SELECT * FROM incidents WHERE ai_remediation IS NULL ORDER BY created_at DESC LIMIT 1` every 10 seconds
+
+**Steps:**
+1. Fetch incident row
+2. `SELECT * FROM alerts WHERE id = ANY(%s)` — all alerts in the incident
+3. For each alert, fetch its `related_event_ids` events from `network_events`
+4. Sort all events chronologically to build a timeline
+5. Build prompt (see below)
+6. Call `ollama_client.generate_json(prompt)`
+7. `UPDATE incidents SET ai_remediation = %s::jsonb, timeline = %s::jsonb WHERE id = %s`
+
+### Prompt Template
+
+```
+You are a senior incident responder. Analyze this security incident and respond ONLY with valid JSON.
+
+INCIDENT: {title}
+
+ALERTS ({alert_count} total):
+{alerts_summary}
+
+TIME SPAN: {start_time} to {end_time} ({duration_minutes} minutes)
+SOURCE IPs INVOLVED: {unique_src_ips}
+DESTINATION IPs INVOLVED: {unique_dst_ips}
+
+TIMELINE SAMPLE:
+{timeline_text}
+
+Respond ONLY with this exact JSON:
+{{"summary": "2-3 sentence high-level description",
+  "attack_pattern": "name of the attack chain",
+  "mitre_tactics": ["list of tactics"],
+  "mitre_techniques": ["T-number - Name"],
+  "timeline": [{{"timestamp": "ISO datetime", "event": "description", "significance": "why this matters"}}],
+  "remediation_steps": ["1. IMMEDIATE: ...", "2. SHORT-TERM: ...", "3. LONG-TERM: ..."],
+  "iocs": ["suspicious IPs or domains"],
+  "analyzed_at": "ISO datetime"}}
+```
+
+### Expected Output (stored in `incidents.ai_remediation`)
 
 ```json
 {
-  "summary": "A two-stage attack was detected originating from internal IP 192.168.1.100. The attacker first performed network reconnaissance (port scan) to identify services, then launched a brute-force attack against the discovered SSH service on 192.168.1.10.",
-  "attack_pattern": "Reconnaissance followed by credential attack (T1046 → T1110)",
+  "summary": "A two-stage attack from internal IP 192.168.1.100. Attacker first performed network reconnaissance, then launched SSH brute force against a discovered service.",
+  "attack_pattern": "Reconnaissance followed by credential attack",
   "mitre_tactics": ["Reconnaissance", "Initial Access"],
   "mitre_techniques": ["T1046 - Network Service Discovery", "T1110 - Brute Force"],
   "timeline": [
-    {
-      "timestamp": "2024-01-15T10:30:05Z",
-      "event": "Port scan initiated from 192.168.1.100",
-      "alert": "Port Scan Detection",
-      "significance": "Reconnaissance phase begins"
-    },
-    {
-      "timestamp": "2024-01-15T10:31:00Z",
-      "event": "SSH brute force started against 192.168.1.10:22",
-      "alert": "SSH Brute Force",
-      "significance": "Exploitation phase — attacker found SSH service via scan"
-    }
+    {"timestamp": "2024-01-15T10:30:05Z", "event": "Port scan from 192.168.1.100", "significance": "Reconnaissance begins"},
+    {"timestamp": "2024-01-15T10:31:00Z", "event": "SSH brute force against 192.168.1.10:22", "significance": "Exploitation attempt"}
   ],
   "remediation_steps": [
-    "1. IMMEDIATE: Block outbound connections from 192.168.1.100 at the firewall level",
-    "2. IMMEDIATE: Change all SSH passwords on 192.168.1.10 and audit login history",
-    "3. SHORT-TERM: Run antivirus/EDR scan on 192.168.1.100 — it may be compromised",
-    "4. SHORT-TERM: Review /var/log/auth.log on 192.168.1.10 for successful logins during attack window",
-    "5. LONG-TERM: Implement fail2ban on SSH services, consider key-based auth only",
-    "6. LONG-TERM: Set up network segmentation to prevent internal lateral movement"
+    "1. IMMEDIATE: Block all outbound connections from 192.168.1.100 at the firewall",
+    "2. IMMEDIATE: Change SSH passwords on 192.168.1.10 and check auth logs",
+    "3. SHORT-TERM: Run antivirus scan on 192.168.1.100",
+    "4. LONG-TERM: Implement fail2ban and key-based SSH auth only"
   ],
   "iocs": ["192.168.1.100", "192.168.1.10"],
   "analyzed_at": "2024-01-15T10:35:00Z"
@@ -193,402 +257,135 @@ via the `alerts:updated` Redis channel.
 
 ---
 
-## File Structure You Own
+## Agent Evaluation Tests (Required for Grade)
 
-```
-backend/
-└── app/
-    ├── agents/
-    │   ├── __init__.py
-    │   ├── ollama_client.py      ← HTTP client for Ollama API
-    │   ├── threat_analyst.py     ← Agent 1: subscribes to alerts:new, enriches alerts
-    │   └── incident_response.py  ← Agent 2: called on incident creation
-    ├── api/
-    │   └── incidents.py          ← POST/GET/PATCH /api/incidents
-    └── tests/
-        ├── test_agents.py        ← unit tests with mocked Ollama
-        └── test_agent_evals.py   ← evaluation tests (quality checks)
-```
-
----
-
-## Ollama Client — Specification
+Evaluations check output quality, not just that code runs.
 
 ```python
-# app/agents/ollama_client.py
+# services/agents/tests/test_agent_evals.py
 
-OLLAMA_URL = settings.OLLAMA_URL  # http://ollama:11434
-
-async def generate(prompt: str, model: str = "llama3.2:3b") -> str:
-    """
-    Call Ollama generate endpoint.
-    Returns the raw text response from the LLM.
-    Raises OllamaError if Ollama is unavailable.
-    """
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,   # lower = more deterministic, better for security analysis
-                    "num_predict": 500    # limit response length
-                }
-            }
-        )
-        return response.json()["response"]
-
-async def generate_json(prompt: str, model: str = "llama3.2:3b") -> dict:
-    """
-    Same as generate() but parses the response as JSON.
-    Retries once if JSON parsing fails (LLMs sometimes produce malformed JSON).
-    Falls back to a default error structure if both attempts fail.
-    """
-
-async def ensure_model_available(model: str = "llama3.2:3b") -> None:
-    """
-    Checks if model is downloaded. If not, pulls it.
-    Called at application startup.
-    POST /api/pull with {"name": model}
-    """
-```
-
----
-
-## Agent 1 — Threat Analyst: Prompt Template
-
-```
-You are a cybersecurity expert analyzing a network security alert.
-Analyze the following alert and provide your assessment in valid JSON format.
-
-ALERT DETAILS:
-Rule: {rule_name}
-Severity: {severity}
-Time: {timestamp}
-
-TRIGGERING EVENT:
-Source IP: {src_ip}
-Destination IP: {dst_ip}
-Protocol: {protocol}
-Destination Port: {dst_port}
-TCP Flags: {flags}
-Bytes: {bytes_sent}
-Direction: {direction}
-
-RELATED EVENTS SAMPLE ({related_count} total events triggered this rule):
-{related_events_summary}
-
-RECENT ALERTS FROM SAME SOURCE IP:
-{recent_alerts_summary}
-
-Respond ONLY with valid JSON in this exact format:
-{{
-  "threat_assessment": "2-3 sentence explanation of what this alert means",
-  "severity_justification": "Why this severity level is appropriate",
-  "mitre_tactic": "One of: Reconnaissance, Initial Access, Execution, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Lateral Movement, Collection, Command and Control, Exfiltration, Impact",
-  "mitre_technique": "T-number and name, e.g. T1046 - Network Service Discovery",
-  "confidence": 0.0 to 1.0,
-  "is_false_positive_likely": true or false,
-  "recommended_action": "Specific immediate action to take",
-  "iocs": ["list", "of", "suspicious", "IPs", "or", "domains"]
-}}
-```
-
-### related_events_summary format (inject into prompt):
-```
-- 10:30:01Z: 192.168.1.100 → 8.8.8.8:21 (TCP SYN, 60 bytes)
-- 10:30:02Z: 192.168.1.100 → 8.8.8.8:22 (TCP SYN, 60 bytes)
-- 10:30:02Z: 192.168.1.100 → 8.8.8.8:23 (TCP SYN, 60 bytes)
-... (showing 10 of 34 total events)
-```
-
----
-
-## Agent 2 — Incident Response: Prompt Template
-
-```
-You are a senior incident responder investigating a security incident.
-Analyze the following incident and provide a structured response plan in valid JSON.
-
-INCIDENT: {title}
-
-ALERTS IN THIS INCIDENT ({alert_count} alerts):
-{alerts_summary}
-
-FULL TIMELINE OF EVENTS ({event_count} total network events):
-{timeline_summary}
-
-UNIQUE SOURCE IPs INVOLVED: {unique_src_ips}
-UNIQUE DESTINATION IPs INVOLVED: {unique_dst_ips}
-TIME SPAN: {start_time} to {end_time} ({duration_minutes} minutes)
-
-Respond ONLY with valid JSON in this exact format:
-{{
-  "summary": "2-3 sentence high-level description of the attack",
-  "attack_pattern": "Name of the attack pattern/chain",
-  "mitre_tactics": ["list", "of", "tactics"],
-  "mitre_techniques": ["T-number - Name", "T-number - Name"],
-  "timeline": [
-    {{"timestamp": "ISO datetime", "event": "description", "alert": "rule name or null", "significance": "why this matters"}}
-  ],
-  "remediation_steps": [
-    "1. Step with timing indicator (IMMEDIATE/SHORT-TERM/LONG-TERM)",
-    "2. Next step"
-  ],
-  "iocs": ["suspicious IPs/domains/hashes"],
-  "analyzed_at": "ISO datetime of analysis"
-}}
-```
-
----
-
-## Incident API Endpoints
-
-### POST /api/incidents
-Creates an incident from a list of alert IDs. Triggers Agent 2 asynchronously.
-
-**Request:**
-```json
-{
-  "title": "Port scan followed by SSH brute force from 192.168.1.100",
-  "description": "Optional manual description",
-  "alert_ids": ["a1b2c3d4-...", "b2c3d4e5-..."]
-}
-```
-
-**Response (201):**
-```json
-{
-  "id": "c3d4e5f6-...",
-  "title": "Port scan followed by SSH brute force from 192.168.1.100",
-  "severity": "critical",
-  "status": "open",
-  "created_at": "2024-01-15T10:35:00Z",
-  "alert_ids": ["a1b2c3d4-...", "b2c3d4e5-..."],
-  "ai_remediation": null,
-  "timeline": null
-}
-```
-
-Agent 2 runs in the background. `ai_remediation` and `timeline` are populated asynchronously,
-then the updated incident can be fetched via GET /api/incidents/{id}.
-
-**Severity derivation**: use the highest severity across all included alerts.
-
-### GET /api/incidents
-Returns list of incidents (paginated, ordered by created_at desc).
-
-### GET /api/incidents/{id}
-Returns full incident including ai_remediation and timeline (null until Agent 2 finishes).
-
-### PATCH /api/incidents/{id}
-Update status: "open" → "in_progress" → "resolved".
-
----
-
-## Agent Evaluation Framework (Required for Grade)
-
-You must write evaluation tests that measure agent output quality. These are NOT just unit tests
-— they measure whether the AI produces useful output.
-
-```python
-# backend/tests/test_agent_evals.py
-
-# Eval scenario definitions
 EVAL_SCENARIOS = [
     {
-        "name": "Port scan detection",
-        "alert": {
-            "rule_name": "Port Scan Detection",
-            "severity": "high",
-            "src_ip": "192.168.1.100",
-            "dst_ip": "8.8.8.8",
-            "protocol": "TCP",
-            "related_count": 34,
-        },
-        "expected_mitre_tactic": "Reconnaissance",
-        "expected_false_positive": False,
+        "name": "Port scan",
+        "alert": {"rule_name": "Port Scan Detection", "severity": "high",
+                  "src_ip": "192.168.1.100", "protocol": "TCP", "related_count": 34},
+        "expect_mitre_tactic": "Reconnaissance",
+        "expect_false_positive": False,
         "min_confidence": 0.6,
     },
     {
-        "name": "DNS flood false positive (internal DNS server)",
-        "alert": {
-            "rule_name": "Unusual DNS Activity",
-            "severity": "low",
-            "src_ip": "192.168.1.1",   # typical DNS server IP
-            "dst_ip": "8.8.8.8",
-            "protocol": "UDP",
-            "related_count": 210,
-        },
-        "expected_false_positive": True,   # DNS server behavior is normal
+        "name": "DNS server false positive",
+        "alert": {"rule_name": "Unusual DNS Activity", "severity": "low",
+                  "src_ip": "192.168.1.1", "protocol": "UDP", "related_count": 210},
+        "expect_false_positive": True,   # typical DNS server, should be FP
         "max_confidence": 0.5,
-    }
+    },
 ]
 
-def test_agent1_mitre_tactic_accuracy():
-    """Agent 1 should identify Reconnaissance for port scan."""
-    # Mock Ollama with a realistic response
-    # Check that mitre_tactic == "Reconnaissance"
-
-def test_agent1_output_is_valid_json():
-    """Agent 1 must always return parseable JSON, even with bad input."""
-
-def test_agent1_confidence_is_float_in_range():
-    """Confidence must be 0.0-1.0 float."""
-
-def test_agent1_required_fields_present():
-    """All required JSON fields must be present in every response."""
-    required = ["threat_assessment", "severity_justification", "mitre_tactic",
-                "confidence", "is_false_positive_likely", "recommended_action"]
-
-def test_agent2_remediation_steps_not_empty():
-    """Agent 2 must produce at least 3 remediation steps."""
-
-def test_agent2_timeline_is_chronological():
-    """Events in the timeline must be in ascending timestamp order."""
-
-def test_agent_graceful_ollama_failure():
-    """If Ollama is unavailable, agents must not crash — store error message in ai_analysis."""
+def test_agent1_output_is_valid_json()  # must always return parseable JSON
+def test_agent1_has_all_required_fields()  # all fields present
+def test_agent1_confidence_is_float_between_0_and_1()
+def test_agent1_port_scan_identifies_reconnaissance()  # mitre_tactic check
+def test_agent2_remediation_has_at_least_3_steps()
+def test_agent2_timeline_is_chronological()  # timestamps in order
+def test_agent_handles_ollama_failure_gracefully()  # error dict, no crash
 ```
 
 ---
 
-## Handling Ollama Failures Gracefully
+## Testing Requirements
 
-Ollama may be slow, unavailable, or return malformed JSON. Always handle this:
+Write tests in `services/agents/tests/test_agents.py`:
 
-```python
-try:
-    result = await ollama_client.generate_json(prompt)
-except OllamaError:
-    result = {
-        "threat_assessment": "AI analysis unavailable — Ollama service unreachable.",
-        "severity_justification": "Manual review required.",
-        "mitre_tactic": "Unknown",
-        "confidence": 0.0,
-        "is_false_positive_likely": None,
-        "recommended_action": "Manually investigate this alert.",
-        "iocs": [],
-        "analyzed_at": datetime.utcnow().isoformat() + "Z",
-        "error": "Ollama unavailable"
-    }
-```
+1. Agent 1 builds correct prompt from alert + events
+2. Agent 1 stores error dict when Ollama is unavailable (does not crash)
+3. Agent 1 handles invalid JSON from LLM (retries, then falls back)
+4. Agent 2 sorts timeline events chronologically
+5. Agent 2 correctly derives attack pattern from multiple alerts
+6. All required output fields are always present
 
 ---
 
 ## AI Prompt — Give This Exactly to Claude
 
 ```
-You are implementing the AI agent subsystem for a SIEM (Security Information and Event
-Management) tool. The project uses Python, FastAPI, async SQLAlchemy, Redis (async), and Ollama
-(local LLM API at http://ollama:11434).
+You are implementing the AI agent service for a SIEM tool.
+This is a standalone Python service in services/agents/.
+It uses: redis-py (async), psycopg2 (sync), httpx (async).
 
-The following SQLAlchemy models are already defined by a teammate:
-- Alert: id, rule_id, rule_name, severity, timestamp, status, triggering_event_id,
-  related_event_ids (JSON list), ai_analysis (JSON nullable), incident_id (UUID FK nullable)
-- NetworkEvent: id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, bytes_sent,
-  direction, interface, flags
-- Incident: id, title, description, severity, status, created_at, updated_at,
-  alert_ids (JSON list), ai_remediation (JSON nullable), timeline (JSON nullable)
+PostgreSQL tables (read and update, created by Symfony):
+  alerts: id uuid, rule_id, rule_name, severity, timestamp, status,
+          triggering_event_id uuid, related_event_ids jsonb, ai_analysis jsonb nullable, incident_id uuid nullable
+  network_events: id uuid, timestamp, src_ip, dst_ip, src_port, dst_port,
+                  protocol, bytes_sent, direction, interface, flags
+  incidents: id uuid, title, severity, status, created_at, alert_ids jsonb,
+             ai_remediation jsonb nullable, timeline jsonb nullable
 
 Redis channels:
   Subscribe from: "alerts:new"
   Publish to:     "alerts:updated"
 
-Your task is to implement:
+Ollama API: POST {OLLAMA_URL}/api/generate
+  Body: {"model": "llama3.2:3b", "prompt": "...", "stream": false, "options": {"temperature": 0.3}}
+  Response: {"response": "...text..."}
 
-1. backend/app/agents/ollama_client.py
-   - async generate(prompt, model="llama3.2:3b") → str: calls POST /api/generate on Ollama
-   - async generate_json(prompt, model) → dict: calls generate(), parses JSON, retries once
-     on parse failure, returns error dict if both fail
-   - async ensure_model_available(model) → None: calls GET /api/tags to check if model exists,
-     if not calls POST /api/pull (this is blocking/slow — do it at startup)
-   - Use temperature=0.3, num_predict=600
+Implement:
 
-2. backend/app/agents/threat_analyst.py
-   - async run_threat_analyst(): subscribes to Redis "alerts:new", for each alert:
-     a. Fetch alert from DB
-     b. Fetch triggering event and up to 10 related events from DB
-     c. Fetch last 5 alerts for same src_ip from DB
-     d. Build prompt using the EXACT template (I will provide it)
-     e. Call ollama_client.generate_json()
-     f. Add "analyzed_at" field to result
-     g. Update Alert.ai_analysis in DB
-     h. Publish updated alert to Redis "alerts:updated"
-   - Handle Ollama errors gracefully: store error dict in ai_analysis, never crash
+1. services/agents/ollama_client.py
+   - async generate(prompt, model="llama3.2:3b") -> str
+   - async generate_json(prompt, model) -> dict: calls generate(), json.loads(), retries once,
+     returns {"error": "parse failed", "analyzed_at": "..."} on second failure
+   - async ensure_model_available(model): GET /api/tags to check, POST /api/pull if missing
 
-   Prompt template to use (fill {placeholders}):
-   "You are a cybersecurity expert analyzing a network security alert.
-   Analyze the following alert and provide your assessment in valid JSON.
+2. services/agents/agent1_threat_analyst.py
+   - async run(): subscribe to Redis "alerts:new", for each message:
+     a. Fetch full alert from PostgreSQL
+     b. Fetch up to 10 related events by related_event_ids
+     c. Fetch last 5 alerts from same src_ip
+     d. Format related_events_text as: "10:30:01Z: 192.168.1.100 -> 8.8.8.8:21 (TCP SYN)"
+     e. Format recent_alerts_text as: "10:29:00Z: SSH Brute Force (critical)"
+     f. Build prompt using the exact template provided
+     g. Call generate_json(prompt)
+     h. Add "analyzed_at" field with current UTC ISO timestamp
+     i. UPDATE alerts SET ai_analysis WHERE id
+     j. PUBLISH "alerts:updated" with full alert JSON including ai_analysis
+   - On any exception from Ollama: store {"error": "...", "analyzed_at": "..."} in ai_analysis
 
-   ALERT DETAILS:
-   Rule: {rule_name} | Severity: {severity} | Time: {timestamp}
+3. services/agents/agent2_incident_response.py
+   - async run(): every 10 seconds poll:
+     SELECT * FROM incidents WHERE ai_remediation IS NULL ORDER BY created_at DESC LIMIT 1
+     If found:
+     a. Fetch all alerts by alert_ids
+     b. Fetch all events referenced in each alert's related_event_ids
+     c. Sort all events by timestamp (chronological)
+     d. Build timeline_text: "10:30:05Z: TCP SYN 192.168.1.100->8.8.8.8:21"
+     e. Build alerts_summary: "Port Scan Detection (high), SSH Brute Force (critical)"
+     f. Build prompt using exact template provided
+     g. Call generate_json(prompt)
+     h. Add "analyzed_at" to result
+     i. UPDATE incidents SET ai_remediation, timeline WHERE id
+     (Store the timeline array from the LLM response in incidents.timeline)
 
-   TRIGGERING EVENT:
-   {src_ip} → {dst_ip}:{dst_port} via {protocol} ({flags}), {bytes_sent} bytes, {direction}
+4. A main.py that runs both agents concurrently using asyncio.gather() and calls
+   ensure_model_available() at startup before starting agents.
 
-   SAMPLE OF {related_count} RELATED EVENTS:
-   {related_events_text}
+5. services/agents/requirements.txt: redis, psycopg2-binary, httpx, pytest, pytest-asyncio
 
-   RECENT ALERTS FROM SAME SOURCE:
-   {recent_alerts_text}
+6. services/agents/Dockerfile: FROM python:3.11-slim, install requirements, run main.py
 
-   Respond ONLY with this JSON:
-   {{"threat_assessment": str, "severity_justification": str, "mitre_tactic": str,
-     "mitre_technique": str, "confidence": float, "is_false_positive_likely": bool,
-     "recommended_action": str, "iocs": [str]}}"
+7. services/agents/tests/test_agents.py
+   Mock psycopg2 with unittest.mock, mock ollama_client.generate_json:
+   - Agent 1 builds prompt containing src_ip and rule_name
+   - Agent 1 updates alert ai_analysis with LLM result
+   - Agent 1 stores error dict when Ollama raises exception
+   - Agent 1 handles generate_json returning error dict (stores it, does not crash)
+   - Agent 2 sorts events chronologically before building prompt
 
-3. backend/app/agents/incident_response.py
-   - async analyze_incident(incident_id: UUID, db: AsyncSession) → dict:
-     a. Fetch incident with its alerts from DB
-     b. Fetch all events referenced in all alert.related_event_ids
-     c. Sort events by timestamp to build timeline
-     d. Build prompt (template provided below)
-     e. Call ollama_client.generate_json()
-     f. Update Incident.ai_remediation and Incident.timeline in DB
-     g. Return the full incident object
-
-   Prompt template:
-   "You are a senior incident responder. Analyze this incident and respond ONLY in JSON.
-
-   INCIDENT: {title}
-   ALERTS ({alert_count}): {alerts_summary}
-   TIME SPAN: {start_time} to {end_time}
-   SOURCE IPs: {unique_src_ips} | DESTINATION IPs: {unique_dst_ips}
-
-   TIMELINE SAMPLE:
-   {timeline_text}
-
-   JSON format:
-   {{"summary": str, "attack_pattern": str, "mitre_tactics": [str], "mitre_techniques": [str],
-     "timeline": [{{"timestamp": str, "event": str, "significance": str}}],
-     "remediation_steps": [str], "iocs": [str], "analyzed_at": str}}"
-
-4. backend/app/api/incidents.py
-   - POST /api/incidents: creates incident, derives severity from max alert severity,
-     runs analyze_incident() as asyncio background task, returns 201 immediately
-   - GET /api/incidents: paginated list ordered by created_at desc
-   - GET /api/incidents/{id}: full incident including ai_remediation and timeline
-   - PATCH /api/incidents/{id}: update status only
-
-5. backend/tests/test_agents.py
-   Unit tests with Ollama mocked (monkeypatch generate_json):
-   - Agent 1 correctly builds prompt with event data
-   - Agent 1 handles invalid JSON from LLM (tests fallback)
-   - Agent 1 handles Ollama unavailable (tests error dict stored)
-   - Agent 2 correctly orders timeline chronologically
-   - All required fields present in output
-
-6. backend/tests/test_agent_evals.py
-   Evaluation tests (Ollama mocked with realistic responses):
-   - Port scan → expects mitre_tactic "Reconnaissance"
-   - ICMP flood → expects mitre_tactic "Impact" or "Reconnaissance"
-   - SSH brute force → expects is_false_positive_likely: false, confidence > 0.7
-   - confidence is always float between 0.0 and 1.0
-   - remediation_steps has >= 3 items for any incident
-
-Start run_threat_analyst() as a background task in app/main.py startup.
-Call ensure_model_available() at startup before starting agents.
+8. services/agents/tests/test_agent_evals.py
+   Mock generate_json to return realistic but controllable responses:
+   - Port scan scenario: response must have mitre_tactic="Reconnaissance"
+   - Confidence field must always be float between 0.0 and 1.0
+   - All required fields must be present in every response
+   - remediation_steps must have at least 3 items
+   - timeline array must be in chronological order
 ```

@@ -1,90 +1,102 @@
-# Teammate 2 — Network Capture & Traffic Processing
+# Teammate 2 — Network Capture & Traffic Processing (Python)
 
 ## Role Overview
 
-You are the data source of the entire SIEM system. Without you, there is nothing to analyze,
-no alerts to fire, no dashboard to show. Your job is to capture real network packets from the
-host machine, parse them into a clean normalized schema, store them in PostgreSQL, and stream
-them in real-time to Redis so the rest of the system reacts immediately.
+You are the data source of the entire SIEM system. You run as a standalone Python service
+in `services/capture/`. Your job is to capture raw network packets, parse them into a clean
+normalized schema, write them to the shared PostgreSQL database, and stream them in real-time
+to Redis so the rule engine and WebSocket broadcaster react immediately.
 
-You also own the traffic statistics engine (top IPs, top ports, protocol breakdown) and the
-historical event search/filter API.
+You also write the traffic statistics logic — the Symfony API (Teammate 1) calls SQL queries
+that you design, but the data comes entirely from what you capture and store.
 
 ---
 
 ## User Stories Owned
 
-| Story | Description |
-|---|---|
-| US-01 | Live inbound/outbound traffic on a dashboard (backend data source) |
-| US-05 | Filter and search through historical traffic logs |
-| US-07 | Traffic statistics: top IPs, top ports, protocol breakdown |
+| Story | Backend data source | API endpoint (owned by Teammate 1) |
+|---|---|---|
+| US-01 | Redis `traffic:events` stream | WebSocket broadcast |
+| US-05 | `network_events` PostgreSQL table | `GET /api/events` |
+| US-07 | `network_events` aggregations | `GET /api/stats` |
+
+You write the data. Teammate 1 serves it.
 
 ---
 
-## Context — Why This Component Exists
+## Tech Stack
 
-### Why scapy?
-`scapy` is a Python library that can capture raw network packets directly from a network
-interface (like Wireshark does). It gives you access to every packet's source IP, destination
-IP, ports, protocol, size, and TCP flags. This is the raw material everything else is built on.
+| Tool | Purpose |
+|---|---|
+| Python 3.11 | Language |
+| scapy | Packet capture and parsing |
+| psycopg2 | Direct PostgreSQL writes (no ORM needed) |
+| redis-py | Publish to Redis |
+| httpx | Fetch monitoring config from Symfony API |
+| pytest | Tests |
 
-### Why does the capture run in a separate container?
-Packet capture requires root-level network access (`NET_RAW` capability). Running it separately
-means we isolate the privileged code from the main API server. The capture container has
-`network_mode: host` (sees real network interfaces) and publishes to Redis.
+---
 
-### Why publish to Redis instead of writing directly to PostgreSQL?
-Speed. Writing to PostgreSQL on every packet would be too slow for high-traffic networks. Instead:
-1. Capture every packet → publish to Redis immediately (microseconds)
-2. Batch-write to PostgreSQL every 5 seconds (bulk insert)
+## Context
 
-The rule engine (P3) consumes from Redis in real-time. The database is for historical queries.
+### Why a separate Python service?
+Packet capture requires root-level OS access (`NET_RAW` capability). Running it isolated in
+its own container means this privileged code never touches the PHP API server. The container
+runs with `network_mode: host` so scapy can see the real network interfaces.
 
-### Why does the capture service read config from the backend API?
-The monitoring config (which interfaces/subnets to watch) is stored in PostgreSQL and managed
-via the UI. The capture service fetches this config at startup and every 60 seconds so that
-config changes made in the UI take effect without restarting the container.
+### Why write directly to PostgreSQL instead of going through the API?
+At 100+ events/second, going through HTTP would be too slow and would flood the API.
+Direct bulk inserts with psycopg2 every 5 seconds are much faster.
+
+### Why also publish to Redis?
+The rule engine (Teammate 3) needs to evaluate every packet in real-time — milliseconds after
+capture, not 5 seconds later. Redis pub/sub delivers each event instantly. The database is
+for historical queries; Redis is for real-time reaction.
+
+### Why fetch config from the Symfony API?
+The monitoring config (which interfaces/subnets to watch) is managed via the frontend UI and
+stored in PostgreSQL. Fetching it from the API every 60 seconds means a network admin can
+change the scope from the UI without restarting this container.
 
 ---
 
 ## Architecture Position
 
 ```
-Network interface (eth0, wlan0)
-        │  raw packets
+Network interfaces (eth0, wlan0)
+        │ raw packets
         ▼
-[capture container]  ← reads config from GET http://localhost:8000/api/config
+[services/capture/]
         │
-        ├──► Redis "traffic:events"  (real-time, every packet)
-        │         │
-        │         ├──► Rule Engine (P3) subscribes → generates alerts
-        │         └──► WebSocket handler (P1) subscribes → sends to browser
+        ├── PUBLISH to Redis "traffic:events"   (every packet, immediate)
+        │         └── Teammate 3 rule engine subscribes
+        │         └── Teammate 1 Ratchet WS server subscribes → browser
         │
-        ├──► PostgreSQL network_events table  (bulk insert every 5 seconds)
-        │
-        └──► In-memory stats accumulator (flushed to stats every 30 seconds)
-
-[backend container] — your API endpoints:
-        GET  /api/events   → P5 frontend queries historical events
-        GET  /api/stats    → P5 frontend fetches statistics
+        └── bulk INSERT to PostgreSQL network_events  (every 5 seconds)
+                  └── Teammate 1 Symfony serves GET /api/events and GET /api/stats
 ```
 
 ---
 
-## What You Receive (Inputs)
+## File Structure
 
-1. **Raw network packets** from the OS network stack (via scapy)
-2. **Monitoring config** from `GET http://localhost:8000/api/config` (fetched at startup + polling)
-3. **HTTP GET requests** from the frontend (P5) to `/api/events` and `/api/stats`
+```
+services/capture/
+├── sniffer.py        ← main capture loop, publishes to Redis, bulk inserts to PG
+├── simulator.py      ← fake traffic generator for testing (no real network needed)
+├── parsers/
+│   └── packet_parser.py  ← converts scapy packet to normalized dict
+├── tests/
+│   └── test_capture.py
+├── requirements.txt
+└── Dockerfile
+```
 
 ---
 
-## What You Produce (Outputs)
+## What You Publish to Redis — `traffic:events`
 
-### 1. Redis message on channel `traffic:events`
-
-Published for every captured packet. P3 (rule engine) and P1 (WebSocket) consume this.
+Every captured packet is published as JSON immediately:
 
 ```json
 {
@@ -103,338 +115,136 @@ Published for every captured packet. P3 (rule engine) and P1 (WebSocket) consume
 ```
 
 **Field rules:**
-- `direction`: "outbound" if src_ip is in monitored_subnets, "inbound" if dst_ip is, "internal" if both are
-- `flags`: TCP flags as string ("SYN", "SYN-ACK", "ACK", "FIN", "RST") or null for UDP/ICMP
-- `protocol`: "TCP", "UDP", "ICMP", or "OTHER"
-- `id`: generate a UUID4 at capture time
-- ICMP packets: `src_port` and `dst_port` are null
-
-### 2. PostgreSQL rows in `network_events` table
-
-Bulk-inserted every 5 seconds. Same fields as the Redis message.
-
-### 3. GET /api/events response
-
-```json
-{
-  "items": [
-    {
-      "id": "3f2a1b4c-8d9e-4f5a-b6c7-d8e9f0a1b2c3",
-      "timestamp": "2024-01-15T10:30:00Z",
-      "src_ip": "192.168.1.100",
-      "dst_ip": "8.8.8.8",
-      "src_port": 54321,
-      "dst_port": 443,
-      "protocol": "TCP",
-      "bytes_sent": 1500,
-      "direction": "outbound",
-      "interface": "eth0",
-      "flags": "SYN"
-    }
-  ],
-  "total": 15420,
-  "page": 1,
-  "limit": 50,
-  "pages": 309
-}
-```
-
-### 4. GET /api/stats response
-
-```json
-{
-  "time_range": "1h",
-  "total_events": 8450,
-  "total_bytes": 12582912,
-  "events_per_minute": 140.8,
-  "top_source_ips": [
-    { "ip": "192.168.1.100", "event_count": 3200, "bytes": 4096000 },
-    { "ip": "192.168.1.55",  "event_count": 1800, "bytes": 2048000 },
-    { "ip": "10.0.0.5",      "event_count": 1200, "bytes": 1536000 }
-  ],
-  "top_destination_ips": [
-    { "ip": "8.8.8.8",      "event_count": 900, "bytes": 1200000 },
-    { "ip": "1.1.1.1",      "event_count": 750, "bytes": 900000 }
-  ],
-  "top_ports": [
-    { "port": 443,  "protocol": "TCP", "event_count": 4200 },
-    { "port": 80,   "protocol": "TCP", "event_count": 1500 },
-    { "port": 53,   "protocol": "UDP", "event_count": 800 },
-    { "port": 22,   "protocol": "TCP", "event_count": 200 }
-  ],
-  "protocol_breakdown": {
-    "TCP": 6800,
-    "UDP": 1400,
-    "ICMP": 250,
-    "OTHER": 0
-  },
-  "inbound_count": 3100,
-  "outbound_count": 5200,
-  "internal_count": 150
-}
-```
+- `direction`: `outbound` if `src_ip` is in monitored_subnets, `inbound` if `dst_ip` is, `internal` if both
+- `flags`: TCP flags string (`SYN`, `ACK`, `SYN-ACK`, `FIN`, `RST`) or `null` for UDP/ICMP
+- `protocol`: `TCP`, `UDP`, `ICMP`, or `OTHER`
+- `src_port` / `dst_port`: `null` for ICMP packets
+- `id`: generate UUID4 at capture time
 
 ---
 
-## File Structure You Own
+## What You Write to PostgreSQL — `network_events` table
 
+Same fields as the Redis message. Bulk-insert every 5 seconds:
+
+```python
+# psycopg2 bulk insert (executemany)
+INSERT INTO network_events
+  (id, timestamp, src_ip, dst_ip, src_port, dst_port,
+   protocol, bytes_sent, direction, interface, flags)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ```
-backend/
-└── app/
-    ├── capture/
-    │   ├── __init__.py
-    │   └── sniffer.py       ← scapy capture loop + Redis publisher
-    ├── parsers/
-    │   ├── __init__.py
-    │   └── packet_parser.py ← converts scapy packet → normalized dict
-    ├── services/
-    │   ├── __init__.py
-    │   └── stats.py         ← in-memory stats accumulator + DB flush
-    └── api/
-        ├── events.py        ← GET /api/events (search/filter)
-        └── stats.py         ← GET /api/stats
-```
+
+The table schema is created by Teammate 1's Doctrine migration. You only INSERT, never
+create tables.
 
 ---
 
-## Detailed Implementation Guide
+## Simulator (for CI and testing)
 
-### sniffer.py — The Main Loop
+`simulator.py` generates realistic fake traffic at ~100 events/second.
+Controlled by env var `CAPTURE_MODE=simulate|live`.
 
-```python
-# Pseudocode for the capture loop
-async def main():
-    config = await fetch_config()       # GET /api/api/config
-    interfaces = config["monitored_interfaces"]  # e.g. ["eth0"]
-    subnets = config["monitored_subnets"]        # e.g. ["192.168.1.0/24"]
-
-    buffer = []   # packet buffer for bulk DB insert
-
-    def packet_handler(packet):
-        if not is_relevant(packet, subnets): return
-        event = parse_packet(packet, subnets)  # → normalized dict
-        redis.publish("traffic:events", event)  # immediate
-        buffer.append(event)
-
-    # Flush buffer to PostgreSQL every 5 seconds
-    # Reload config every 60 seconds
-    # Run scapy AsyncSniffer on all monitored interfaces
-    sniffer = AsyncSniffer(iface=interfaces, prn=packet_handler, store=False)
-    sniffer.start()
-```
-
-### packet_parser.py — The Parser
+Include these attack scenarios so the rule engine can be tested without real traffic:
+- **Port scan**: one src_ip hitting 25 different dst_ports in 30 seconds
+- **SSH brute force**: 15 TCP SYN packets to dst_port=22 from same src_ip in 20 seconds
+- **ICMP flood**: 110 ICMP packets from one IP in 8 seconds
 
 ```python
-from scapy.all import IP, TCP, UDP, ICMP
-
-def parse_packet(packet, monitored_subnets: list[str]) -> dict | None:
-    """
-    Convert a scapy packet to our normalized event schema.
-    Returns None if packet is not IP-based (skip ARP, etc.)
-    """
-    if not packet.haslayer(IP):
-        return None
-
-    ip = packet[IP]
-    event = {
-        "id": str(uuid4()),
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "src_ip": ip.src,
-        "dst_ip": ip.dst,
-        "src_port": None,
-        "dst_port": None,
-        "protocol": "OTHER",
-        "bytes_sent": len(packet),
-        "direction": determine_direction(ip.src, ip.dst, monitored_subnets),
-        "interface": packet.sniffed_on or "unknown",
-        "flags": None,
-    }
-
-    if packet.haslayer(TCP):
-        tcp = packet[TCP]
-        event["protocol"] = "TCP"
-        event["src_port"] = tcp.sport
-        event["dst_port"] = tcp.dport
-        event["flags"] = parse_tcp_flags(tcp.flags)  # "SYN", "ACK", etc.
-
-    elif packet.haslayer(UDP):
-        udp = packet[UDP]
-        event["protocol"] = "UDP"
-        event["src_port"] = udp.sport
-        event["dst_port"] = udp.dport
-
-    elif packet.haslayer(ICMP):
-        event["protocol"] = "ICMP"
-
-    return event
-
-def determine_direction(src_ip: str, dst_ip: str, subnets: list[str]) -> str:
-    src_internal = any(ip_in_subnet(src_ip, s) for s in subnets)
-    dst_internal = any(ip_in_subnet(dst_ip, s) for s in subnets)
-    if src_internal and dst_internal: return "internal"
-    if src_internal: return "outbound"
-    if dst_internal: return "inbound"
-    return "outbound"  # fallback
-```
-
-### events.py — Search API
-
-**Query parameters for GET /api/events:**
-
-| Parameter | Type | Example | Description |
-|---|---|---|---|
-| `page` | int | `1` | Page number (1-indexed) |
-| `limit` | int | `50` | Items per page (max 200) |
-| `src_ip` | string | `192.168.1.100` | Filter by source IP (exact or prefix match) |
-| `dst_ip` | string | `8.8.8.8` | Filter by destination IP |
-| `protocol` | string | `TCP` | "TCP", "UDP", "ICMP" |
-| `port` | int | `443` | Matches src_port OR dst_port |
-| `direction` | string | `outbound` | "inbound", "outbound", "internal" |
-| `from` | ISO datetime | `2024-01-15T10:00:00Z` | Start of time range |
-| `to` | ISO datetime | `2024-01-15T11:00:00Z` | End of time range |
-
-**Example request:**
-```
-GET /api/events?protocol=TCP&port=22&from=2024-01-15T10:00:00Z&limit=20
-```
-
-### stats.py — Statistics API
-
-**Query parameters for GET /api/stats:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `range` | string | `1h` | "15m", "1h", "6h", "24h", "7d" |
-
-Stats are computed with SQL aggregation queries against the `network_events` table.
-Top IPs and top ports: use ORDER BY COUNT(*) DESC LIMIT 10.
-
----
-
-## Traffic Data Simulator (for testing without a real network)
-
-Create `backend/app/capture/simulator.py`. This runs instead of the real sniffer during tests
-and CI. It generates realistic fake packets at ~100 events/second.
-
-```python
-# simulator.py — generates fake traffic for testing
-COMMON_IPS = ["192.168.1.100", "192.168.1.55", "10.0.0.5", "8.8.8.8", "1.1.1.1"]
+INTERNAL_IPS = ["192.168.1.100", "192.168.1.55", "192.168.1.10", "10.0.0.5"]
+EXTERNAL_IPS = ["8.8.8.8", "1.1.1.1", "142.250.74.14"]
 COMMON_PORTS = [80, 443, 22, 53, 8080, 3306, 5432]
-
-async def simulate_traffic():
-    while True:
-        event = {
-            "id": str(uuid4()),
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "src_ip": random.choice(COMMON_IPS),
-            "dst_ip": random.choice(COMMON_IPS),
-            "src_port": random.randint(1024, 65535),
-            "dst_port": random.choice(COMMON_PORTS),
-            "protocol": random.choice(["TCP", "TCP", "TCP", "UDP", "ICMP"]),
-            "bytes_sent": random.randint(64, 9000),
-            "direction": random.choice(["inbound", "outbound"]),
-            "interface": "eth0",
-            "flags": random.choice(["SYN", "ACK", "SYN-ACK", None]),
-        }
-        await redis_client.publish("traffic:events", event)
-        await asyncio.sleep(0.01)  # 100 events/sec
 ```
 
-Use an environment variable `CAPTURE_MODE=simulate|live` to switch between real and simulated.
-This makes CI/CD work without a real network interface.
+---
+
+## Config Polling
+
+```python
+async def fetch_config() -> dict:
+    # GET http://localhost:8000/api/config
+    # Returns: {"monitored_interfaces": [...], "monitored_subnets": [...], "excluded_ips": [...]}
+    # Called at startup and every 60 seconds
+    # On failure: keep using last known config, log warning
+```
 
 ---
 
 ## Testing Requirements
 
-Write tests in `backend/tests/test_capture.py`:
+Write tests in `services/capture/tests/test_capture.py`:
 
-1. Test `parse_packet()` correctly identifies TCP with SYN flag
-2. Test `parse_packet()` correctly identifies UDP
-3. Test `parse_packet()` returns None for non-IP packets
-4. Test `determine_direction()` for inbound, outbound, and internal cases
-5. Test GET /api/events with no filters returns paginated results
-6. Test GET /api/events with `protocol=TCP` filter
-7. Test GET /api/events with `port=443` filter
-8. Test GET /api/stats returns correct protocol_breakdown counts
-9. Test simulator publishes to Redis and messages are received
+1. `parse_packet()` correctly extracts TCP with SYN flag
+2. `parse_packet()` correctly extracts UDP
+3. `parse_packet()` returns `None` for non-IP packets (ARP, etc.)
+4. `determine_direction()` returns `outbound` for internal src, external dst
+5. `determine_direction()` returns `inbound` for external src, internal dst
+6. `determine_direction()` returns `internal` for both internal
+7. Simulator publishes messages that are valid JSON with all required fields
+8. Bulk insert batches correctly into a test PostgreSQL table
 
 ---
 
 ## AI Prompt — Give This Exactly to Claude
 
 ```
-You are implementing the network capture and traffic processing module for a SIEM tool.
-The project uses Python, FastAPI, scapy, SQLAlchemy (async), Redis (async), and PostgreSQL.
+You are implementing the network capture service for a SIEM tool.
+This is a standalone Python service in services/capture/.
+It uses: scapy for packet capture, psycopg2 for PostgreSQL writes,
+redis-py for publishing, httpx for HTTP calls.
 
-The SQLAlchemy model for NetworkEvent is already defined by a teammate with these fields:
-  id (UUID PK), timestamp (DateTime), src_ip (String), dst_ip (String), src_port (Int nullable),
-  dst_port (Int nullable), protocol (String: "TCP"/"UDP"/"ICMP"/"OTHER"), bytes_sent (Int),
-  direction (String: "inbound"/"outbound"/"internal"), interface (String), flags (String nullable)
+The PostgreSQL table network_events already exists (created by a Symfony migration):
+  id uuid, timestamp timestamptz, src_ip varchar(45), dst_ip varchar(45),
+  src_port int nullable, dst_port int nullable, protocol varchar(10),
+  bytes_sent int, direction varchar(10), interface varchar(20), flags varchar(20) nullable
 
-The Redis client (already implemented by teammate 1) has:
-  publish(channel: str, message: dict) → publishes JSON to channel
-  Channel to publish to: "traffic:events"
+Redis channel to publish to: "traffic:events"
+Message format: JSON with fields: id, timestamp, src_ip, dst_ip, src_port, dst_port,
+protocol, bytes_sent, direction, interface, flags
 
-Your task is to implement:
+Implement:
 
-1. backend/app/parsers/packet_parser.py
-   - parse_packet(packet, monitored_subnets) → dict | None
-     Converts a scapy packet to the NetworkEvent schema dict.
+1. services/capture/parsers/packet_parser.py
+   - parse_packet(packet, monitored_subnets: list[str]) -> dict | None
      Returns None for non-IP packets.
-     Determines direction: "outbound" if src_ip in monitored_subnets,
-     "inbound" if dst_ip in monitored_subnets, "internal" if both.
-     Parse TCP flags to human-readable string: "SYN", "ACK", "SYN-ACK", "FIN", "RST", "PSH".
-     ICMP packets have null src_port and dst_port.
-   - ip_in_subnet(ip: str, subnet: str) → bool using Python's ipaddress stdlib
+     Extracts: src_ip, dst_ip, src_port (null for ICMP), dst_port (null for ICMP),
+     protocol (TCP/UDP/ICMP/OTHER), bytes_sent (len(packet)), flags (TCP flags string or null).
+     Determines direction: outbound if src_ip in any subnet, inbound if dst_ip in any subnet,
+     internal if both, uses Python ipaddress stdlib for subnet matching.
+     Parses TCP flags to string: SYN, ACK, SYN-ACK, FIN, RST, PSH (or combinations).
+   - ip_in_subnet(ip: str, subnet: str) -> bool using ipaddress.ip_address in ipaddress.ip_network
 
-2. backend/app/capture/sniffer.py
-   - Fetches monitoring config from http://localhost:8000/api/config at startup
-   - Uses scapy AsyncSniffer on monitored_interfaces
-   - For each packet: parses it, publishes to Redis "traffic:events" immediately
-   - Batches events in a list, bulk-inserts to PostgreSQL every 5 seconds
-   - Refreshes config from API every 60 seconds (so UI changes take effect without restart)
-   - Reads env var CAPTURE_MODE: if "simulate" → runs simulator instead of real sniffer
+2. services/capture/sniffer.py
+   - Reads env vars: DATABASE_URL, REDIS_URL, BACKEND_URL, CAPTURE_MODE (simulate|live)
+   - fetch_config(): GET {BACKEND_URL}/api/config, returns dict, retries on failure
+   - Main loop:
+     a. Fetch config at startup
+     b. If CAPTURE_MODE=simulate: run simulator.py generate_traffic() instead of scapy
+     c. If CAPTURE_MODE=live: use scapy AsyncSniffer on monitored_interfaces
+     d. For each packet: parse_packet() -> if not None: publish to Redis immediately
+     e. Buffer events in a list, bulk INSERT to PostgreSQL every 5 seconds using psycopg2
+     f. Refresh config every 60 seconds (update interfaces/subnets filter)
 
-3. backend/app/capture/simulator.py
-   - Generates realistic fake NetworkEvent dicts at ~100/second
-   - Uses realistic IPs: 192.168.1.x for internal, 8.8.8.8/1.1.1.1/etc for external
-   - Publishes to Redis "traffic:events"
-   - Generates port scan scenario occasionally: same src_ip hitting 20+ different dst_ports in 10 seconds
-   - Generates SSH brute force scenario occasionally: many connections to port 22 from same IP
+3. services/capture/simulator.py
+   - generate_traffic(): async generator yielding one event dict per iteration
+   - Yields ~100 events/second with random IPs and ports from realistic sets
+   - Every 30 seconds, inject a port scan scenario:
+     same src_ip (192.168.1.100) sends TCP SYN to 25 different ports in quick succession
+   - Every 45 seconds, inject SSH brute force:
+     same src_ip sends 15 TCP SYN to dst_port=22 in 15 seconds
 
-4. backend/app/services/stats.py
-   - compute_stats(range_str: str, db: AsyncSession) → dict
-     range_str: "15m", "1h", "6h", "24h", "7d"
-     Returns: total_events, total_bytes, events_per_minute,
-              top_source_ips (top 10 by event_count with bytes),
-              top_destination_ips (top 10),
-              top_ports (top 10 by event_count with protocol),
-              protocol_breakdown (dict TCP/UDP/ICMP/OTHER counts),
-              inbound_count, outbound_count, internal_count
-     Use SQLAlchemy async queries with GROUP BY and ORDER BY COUNT DESC.
+4. services/capture/requirements.txt
+   scapy, psycopg2-binary, redis, httpx, pytest, pytest-asyncio
 
-5. backend/app/api/events.py
-   - GET /api/events with query params: page(int,default=1), limit(int,default=50,max=200),
-     src_ip(str,optional), dst_ip(str,optional), protocol(str,optional), port(int,optional),
-     direction(str,optional), from(datetime,optional), to(datetime,optional)
-   - port filter matches src_port OR dst_port
-   - Returns: {"items": [...], "total": int, "page": int, "limit": int, "pages": int}
-   - GET /api/events/{id} returns single event or 404
+5. services/capture/Dockerfile
+   FROM python:3.11-slim, install requirements, run sniffer.py
 
-6. backend/app/api/stats.py
-   - GET /api/stats?range=1h
-   - Valid ranges: "15m", "1h", "6h", "24h", "7d"
-   - Returns the full stats dict from compute_stats()
-
-7. backend/tests/test_capture.py
-   - Tests for parse_packet (TCP, UDP, ICMP, non-IP)
-   - Tests for determine_direction (inbound, outbound, internal)
-   - Tests for GET /api/events pagination and filters
-   - Tests for GET /api/stats
-   Use pytest-asyncio and httpx.AsyncClient. Mock the DB with an in-memory SQLite for tests.
-
-Register the events and stats routers in app/main.py with prefix="/api".
-All FastAPI routes must use async def and Depends(get_db) for database sessions.
+6. services/capture/tests/test_capture.py
+   Tests using pytest (mock Redis and PostgreSQL with unittest.mock):
+   - parse_packet correctly parses TCP SYN packet
+   - parse_packet correctly parses UDP packet
+   - parse_packet returns None for ARP packet
+   - determine_direction returns correct values for all three cases
+   - simulator yields events with all required fields
+   - bulk insert batches 10 events into a single executemany call
 ```
