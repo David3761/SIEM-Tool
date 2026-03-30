@@ -23,38 +23,46 @@ rule-based alert detection, and AI-powered threat analysis.
 
 ```
 siem-tool/
-├── backend/               # PHP / Symfony 8 — REST API + SSE via Mercure (Teammate 1)
+├── docker-compose.yml         # Container orchestration (Redis, Postgres, AI Agents, etc.)
+├── backend/                   # PHP / Symfony 8 — REST API + SSE via Mercure (Teammate 1)
 │   ├── src/
-│   │   ├── Controller/    # API Endpoints (Alert, Config, Event, Incident, Rule)
-│   │   ├── Entity/        # Doctrine ORM Entities (Alert, Incident, NetworkEvent, etc.)
-│   │   ├── Repository/    # Doctrine Repositories pt. operațiuni DB
-│   │   └── Service/       # Servicii (ex. EventPublisher pt. SSE)
-│   └── ...                # Alte foldere specifice Symfony (config, public, var, vendor)
-├── services/              # Python standalone services
-│   ├── capture/           # Packet capture, traffic stats (Teammate 2)
-│   │   └── parsers/       # Packet normalization
-│   ├── rules/             # Detection rule engine + alert creation (Teammate 3)
-│   └── agents/            # AI Agents 1 and 2 — Ollama integration (Teammate 4)
-├── frontend/              # React + TypeScript (Teammate 5)
+│   │   ├── Controller/        # API Endpoints (Alert, Config, Event, Incident, Rule)
+│   │   ├── Entity/            # Doctrine ORM Entities (Alert, Incident, NetworkEvent, etc.)
+│   │   ├── Repository/        # Doctrine Repositories pt. operațiuni DB
+│   │   └── Service/           # Servicii (ex. EventPublisher pt. SSE)
+│   └── ...                    # Alte foldere specifice Symfony (config, public, var, vendor)
+├── services/                  # Python standalone services
+│   ├── capture/               # Packet capture, traffic stats (Teammate 2)
+│   │   └── parsers/           # Packet normalization
+│   ├── rules/                 # Detection rule engine + alert creation (Teammate 3)
+│   └── agents/                # AI Agents 1 and 2 — Ollama integration (Teammate 4)
+│       ├── tests/             # Unit tests and LLM evaluation with Pytest
+│       ├── agent1_threat_analyst.py    # Redis listener & AI threat analysis
+│       ├── agent2_incident_response.py # Postgres poller & AI remediation plans
+│       ├── main.py            # Async runner for both agents
+│       ├── ollama_client.py   # AI model communication wrapper
+│       ├── Dockerfile         # Container definition for the AI agents
+│       └── requirements.txt   # Python dependencies
+├── frontend/                  # React + TypeScript (Teammate 5)
 │   └── src/
-│       ├── api/           # API client functions
+│       ├── api/               # API client functions
 │       ├── components/
-│       │   ├── alerts/    # Alert table, detail modal, AI analysis panel
-│       │   ├── dashboard/ # Live traffic feed, stats charts
-│       │   ├── incidents/ # Incident timeline, remediation panel
-│       │   ├── layout/    # Sidebar, top bar
-│       │   └── shared/    # Reusable components
-│       ├── hooks/         # Hook pentru SSE (Server-Sent Events)
-│       ├── pages/         # Dashboard, Alerts, Events, Incidents, Settings
-│       ├── tests/         # Frontend tests
-│       └── types/         # TypeScript type definitions
+│       │   ├── alerts/        # Alert table, detail modal, AI analysis panel
+│       │   ├── dashboard/     # Live traffic feed, stats charts
+│       │   ├── incidents/     # Incident timeline, remediation panel
+│       │   ├── layout/        # Sidebar, top bar
+│       │   └── shared/        # Reusable components
+│       ├── hooks/             # Hook pentru SSE (Server-Sent Events)
+│       ├── pages/             # Dashboard, Alerts, Events, Incidents, Settings
+│       ├── tests/             # Frontend tests
+│       └── types/             # TypeScript type definitions
 ├── docs/
-│   ├── diagrams/          # Architecture, ER diagram, sequence diagrams, state machines
+│   ├── diagrams/              # Architecture, ER diagram, sequence diagrams, state machines
 │   ├── teammate_instructions/ # Per-teammate implementation guides
-│   └── SIEM_backlog.md    # User stories and backlog
+│   └── SIEM_backlog.md        # User stories and backlog
 └── .github/
-    ├── ISSUE_TEMPLATE/    # Bug report template
-    └── workflows/         # CI/CD pipelines
+    ├── ISSUE_TEMPLATE/        # Bug report template
+    └── workflows/             # CI/CD pipelines
 ```
 
 ---
