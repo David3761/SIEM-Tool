@@ -35,7 +35,7 @@ You do NOT implement any backend logic. You call APIs that your teammates build.
 |---|---|
 | React 18 + TypeScript | UI framework |
 | Vite | Build tool |
-| Tailwind CSS | Styling (dark theme) |
+| Tailwind CSS & Shadcn | Styling (dark theme) |
 | TanStack Query (React Query v5) | API calls, caching, loading states |
 | Axios | HTTP client |
 | Recharts | Charts (bar, pie, line) |
@@ -62,6 +62,10 @@ Message format (sent by Ratchet):
 ### Why React Query?
 Manages all GET request caching, background refetch, and loading/error states automatically.
 Without it, every component needs its own fetch/loading/error boilerplate.
+
+### Why Shadcn?
+Build beautiful UI using Shadcn components. 
+Create reusable components as much as possible to have a clean code architecture so that we can read it easily.
 
 ---
 
@@ -367,7 +371,7 @@ Use `msw` to mock all API calls. Use `@testing-library/react` for rendering.
 
 ```
 You are implementing the complete frontend for a SIEM tool.
-Stack: React 18, TypeScript, Vite, Tailwind CSS (dark theme), TanStack Query v5,
+Stack: React 18, TypeScript, Vite, Tailwind CSS (dark theme), Shadcn, TanStack Query v5,
 Axios, Recharts, react-hot-toast, react-router-dom v6, Vitest, Testing Library, msw.
 
 REST API base URL: http://localhost:8000/api
