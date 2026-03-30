@@ -1,0 +1,6 @@
+scapy
+psycopg2-binary
+redis
+httpx
+pytest
+pytest-asyncio
