@@ -1,0 +1,5 @@
+redis
+psycopg2-binary
+pyyaml
+pytest
+pytest-asyncio
