@@ -1,0 +1,105 @@
+services:
+  nginx:
+    container_name: nginx
+    image: nginx:latest
+    ports:
+      - "8000:80"
+    volumes:
+      - ./backend:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - php
+
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_DB: siem, POSTGRES_USER: siem, POSTGRES_PASSWORD: siempassword }
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+    healthcheck: { test: ["CMD-SHELL","pg_isready -U siem"], interval: 5s, retries: 5 }
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes: [ollama_models:/root/.ollama]
+    ports: ["11434:11434"]
+
+  php:
+    container_name: php
+    user: "appuser"
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/var/www/html
+    working_dir: /var/www/html
+    depends_on: { postgres: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem?serverVersion=16&charset=utf8
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8080:8080"
+
+#  capture:
+#    build: ./docker/services/capture
+#    network_mode: host
+#    cap_add: [NET_RAW, NET_ADMIN]
+#    environment:
+#      DATABASE_URL: postgresql://siem:siempassword@localhost:5432/siem
+#      REDIS_URL: redis://localhost:6379
+#      BACKEND_URL: http://localhost:8000
+#    depends_on: [redis, postgres]
+
+  rules:
+    build:
+      context: .
+      dockerfile: ./docker/services/rules/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+#  agents:
+#    build: ./docker/services/agents
+#    environment:
+#      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem
+#      REDIS_URL: redis://redis:6379
+#      OLLAMA_URL: http://ollama:11434
+#    depends_on: [redis, postgres, ollama]
+
+#  frontend:
+##    build: ./docker/frontend
+#    ports: ["3000:80"]
+#    depends_on: [php]
+
+  adminer:
+    image: adminer
+    ports:
+      - 8081:8080
+
+  mercure:
+    image: dunglas/mercure
+    environment:
+      SERVER_NAME: ":80"
+      MERCURE_PUBLISHER_JWT_KEY: "aceasta_este_o_cheie_foarte_lunga_si_sigura_pentru_siem_123456"
+      MERCURE_SUBSCRIBER_JWT_KEY: "aceasta_este_o_cheie_foarte_lunga_si_sigura_pentru_siem_123456"
+      MERCURE_EXTRA_DIRECTIVES: |
+        cors_origins *
+        anonymous
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:
+  ollama_models:

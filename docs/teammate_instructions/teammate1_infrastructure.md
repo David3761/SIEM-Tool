@@ -397,7 +397,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t siem-backend ./backend
+      - run: docker build -t backend ./backend
       - run: docker build -t siem-frontend ./frontend
 ```
 

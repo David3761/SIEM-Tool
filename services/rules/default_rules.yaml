@@ -1,5 +1,5 @@
 rules:
-  - id: "port-scan-001"
+  - title: "port-scan-001"
     name: "Port Scan Detection"
     description: "Detects rapid connections to many different ports from a single IP"
     type: "threshold"
@@ -10,7 +10,7 @@ rules:
       window_seconds: 60
       threshold: 20
 
-  - id: "ssh-bruteforce-001"
+  - title: "ssh-bruteforce-001"
     name: "SSH Brute Force"
     description: "Multiple TCP SYN packets to port 22 from the same source"
     type: "threshold"
@@ -24,7 +24,7 @@ rules:
       window_seconds: 30
       threshold: 10
 
-  - id: "high-traffic-001"
+  - title: "high-traffic-001"
     name: "High Traffic Volume"
     description: "Single IP sending unusually high number of packets"
     type: "threshold"
@@ -35,7 +35,7 @@ rules:
       window_seconds: 60
       threshold: 500
 
-  - id: "icmp-flood-001"
+  - title: "icmp-flood-001"
     name: "ICMP Flood"
     description: "Excessive ICMP packets from a single source"
     type: "threshold"
@@ -47,7 +47,7 @@ rules:
       window_seconds: 10
       threshold: 100
 
-  - id: "dns-unusual-001"
+  - title: "dns-unusual-001"
     name: "Unusual DNS Activity"
     description: "High volume of DNS queries from a single host"
     type: "threshold"

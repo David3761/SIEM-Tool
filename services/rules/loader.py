@@ -18,17 +18,17 @@ def load_default_rules(conn: Any) -> None:
 
     rule: dict[str, Any]
     for rule in rules:
-        cursor.execute("SELECT id FROM rules WHERE id = %s", (rule["id"],))
+        cursor.execute("SELECT title FROM rules WHERE title = %s", (rule["title"],))
         if cursor.fetchone() is not None:
             continue
 
         cursor.execute(
             """
-            INSERT INTO rules (id, name, description, rule_type, severity, config, enabled, created_at)
+            INSERT INTO rules (title, name, description, rule_type, severity, config, enabled, created_at)
             VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, NOW())
             """,
             (
-                rule["id"],
+                rule["title"],
                 rule["name"],
                 rule["description"],
                 rule["type"],

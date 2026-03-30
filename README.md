@@ -7,15 +7,15 @@ rule-based alert detection, and AI-powered threat analysis.
 
 ## Tech Stack
 
-| Component | Language / Framework |
-|---|---|
-| REST API + WebSocket | PHP / Symfony 7 + Ratchet |
-| Packet capture | Python / scapy |
-| Rule engine | Python |
+| Component | Language / Framework        |
+|---|-----------------------------|
+| REST API + SSE (Server-Sent Events) | PHP / Symfony 8 + Mercure   |
+| Packet capture | Python / scapy              |
+| Rule engine | Python                      |
 | AI agents | Python / Ollama (local LLM) |
-| Frontend | React / TypeScript |
-| Database | PostgreSQL (Doctrine ORM) |
-| Event bus | Redis |
+| Frontend | React / TypeScript          |
+| Database | PostgreSQL (Doctrine ORM)   |
+| Event bus | Redis                       |
 
 ---
 
@@ -23,8 +23,13 @@ rule-based alert detection, and AI-powered threat analysis.
 
 ```
 siem-tool/
-├── backend/               # PHP / Symfony — REST API + WebSocket (Teammate 1)
-│                          # Symfony scaffolds its own structure here via composer
+├── backend/               # PHP / Symfony 8 — REST API + SSE via Mercure (Teammate 1)
+│   ├── src/
+│   │   ├── Controller/    # API Endpoints (Alert, Config, Event, Incident, Rule)
+│   │   ├── Entity/        # Doctrine ORM Entities (Alert, Incident, NetworkEvent, etc.)
+│   │   ├── Repository/    # Doctrine Repositories pt. operațiuni DB
+│   │   └── Service/       # Servicii (ex. EventPublisher pt. SSE)
+│   └── ...                # Alte foldere specifice Symfony (config, public, var, vendor)
 ├── services/              # Python standalone services
 │   ├── capture/           # Packet capture, traffic stats (Teammate 2)
 │   │   └── parsers/       # Packet normalization
@@ -39,7 +44,7 @@ siem-tool/
 │       │   ├── incidents/ # Incident timeline, remediation panel
 │       │   ├── layout/    # Sidebar, top bar
 │       │   └── shared/    # Reusable components
-│       ├── hooks/         # WebSocket hook
+│       ├── hooks/         # Hook pentru SSE (Server-Sent Events)
 │       ├── pages/         # Dashboard, Alerts, Events, Incidents, Settings
 │       ├── tests/         # Frontend tests
 │       └── types/         # TypeScript type definitions
@@ -64,7 +69,7 @@ siem-tool/
 - [Alert and Incident Lifecycle](docs/diagrams/alert-lifecycle.md)
 
 ### Teammate Instructions
-- [Teammate 1 — PHP / Symfony — REST API, WebSocket, Docker, CI/CD](docs/teammate_instructions/teammate1_infrastructure.md)
+- [Teammate 1 — PHP / Symfony — REST API, SSE (Mercure), Docker, CI/CD](docs/teammate_instructions/teammate1_infrastructure.md)
 - [Teammate 2 — Python — Network Capture and Traffic Processing](docs/teammate_instructions/teammate2_capture.md)
 - [Teammate 3 — Python — Rule Engine and Alert Management](docs/teammate_instructions/teammate3_rules_alerts.md)
 - [Teammate 4 — Python — AI Agents (Ollama)](docs/teammate_instructions/teammate4_ai_agents.md)
