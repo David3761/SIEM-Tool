@@ -1,0 +1,17 @@
+# Medii virtuale
+venv/
+v/
+env/
+
+# Cache si fisiere Python compilate
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Baze de date locale sau log-uri
+*.db
+*.log
+
+# Fisiere de sistem
+.DS_Store
+Thumbs.db
