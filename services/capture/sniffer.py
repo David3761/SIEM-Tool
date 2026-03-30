@@ -16,22 +16,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger("sniffer")
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://siem:siem@localhost:5432/siem")
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://siem:siempassword@postgres:5432/siem")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
-CAPTURE_MODE = os.environ.get("CAPTURE_MODE", "simulate")
+CAPTURE_MODE = os.environ.get("CAPTURE_MODE", "live")
 
 DEFAULT_CONFIG: dict = {
-    "monitored_interfaces": ["eth0"],
+    "monitored_interfaces": ["eth0", "wlan0"],
     "monitored_subnets": ["192.168.1.0/24", "10.0.0.0/8"],
     "excluded_ips": [],
 }
 
 INSERT_SQL = """
 INSERT INTO network_events
-  (id, timestamp, src_ip, dst_ip, src_port, dst_port,
+  (timestamp, src_ip, dst_ip, src_port, dst_port,
    protocol, bytes_sent, direction, interface, flags)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -39,12 +39,21 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 # Config
 # ---------------------------------------------------------------------------
 
+def _apply_defaults(config: dict) -> dict:
+    result = dict(config)
+    for key, default in DEFAULT_CONFIG.items():
+        if not result.get(key):
+            result[key] = default
+            logger.info("Config field '%s' is empty — using default: %s", key, default)
+    return result
+
+
 async def fetch_config(client: httpx.AsyncClient) -> dict:
     for attempt in range(3):
         try:
             resp = await client.get(f"{BACKEND_URL}/api/config", timeout=5.0)
             resp.raise_for_status()
-            return resp.json()
+            return _apply_defaults(resp.json())
         except Exception as exc:
             logger.warning("Config fetch attempt %d failed: %s", attempt + 1, exc)
             if attempt < 2:
@@ -66,7 +75,7 @@ def bulk_insert(conn: psycopg2.extensions.connection, events: list[dict]) -> Non
         return
     rows = [
         (
-            e["id"], e["timestamp"], e["src_ip"], e["dst_ip"],
+            e["timestamp"], e["src_ip"], e["dst_ip"],
             e.get("src_port"), e.get("dst_port"), e["protocol"],
             e["bytes_sent"], e["direction"], e["interface"],
             e.get("flags"),
@@ -90,9 +99,16 @@ async def _run_simulate(config: dict, queue: asyncio.Queue) -> None:
 
 
 async def _run_live(config: dict, queue: asyncio.Queue) -> None:
-    from scapy.all import AsyncSniffer
+    from scapy.all import AsyncSniffer, get_if_list
 
-    interfaces = config.get("monitored_interfaces", ["eth0"])
+    available = get_if_list()
+    interfaces = [i for i in config.get("monitored_interfaces", ["eth0", "wlan0"]) if i in available]
+    skipped = set(config.get("monitored_interfaces", [])) - set(interfaces)
+    if skipped:
+        logger.warning("Interfaces not found, skipping: %s", skipped)
+    if not interfaces:
+        logger.error("No valid interfaces to capture on — exiting")
+        return
     loop = asyncio.get_event_loop()
 
     def _callback(packet):
@@ -145,6 +161,7 @@ async def main() -> None:
         else:
             capture_task = asyncio.create_task(_run_live(config, event_queue))
 
+        packets_published = 0
         try:
             while True:
                 now = time.monotonic()
@@ -165,6 +182,14 @@ async def main() -> None:
                     event = event_queue.get_nowait()
                     try:
                         redis_client.publish("traffic:events", json.dumps(event))
+                        packets_published += 1
+                        if packets_published % 10 == 0:
+                            logger.info(
+                                "Published %d packets to Redis (last: %s -> %s %s)",
+                                packets_published,
+                                event.get("src_ip"), event.get("dst_ip"),
+                                event.get("protocol"),
+                            )
                     except Exception as exc:
                         logger.error("Redis publish failed: %s", exc)
                     event_buffer.append(event)

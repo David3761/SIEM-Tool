@@ -13,13 +13,13 @@ services:
   postgres:
     image: postgres:16
     environment: { POSTGRES_DB: siem, POSTGRES_USER: siem, POSTGRES_PASSWORD: siempassword }
-    volumes: [postgres_data:/var/lib/postgresql/data]
-    ports: ["5432:5432"]
-    healthcheck: { test: ["CMD-SHELL","pg_isready -U siem"], interval: 5s, retries: 5 }
+    volumes: [ postgres_data:/var/lib/postgresql/data ]
+    ports: [ "5432:5432" ]
+    healthcheck: { test: [ "CMD-SHELL", "pg_isready -U siem" ], interval: 5s, retries: 5 }
 
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    ports: [ "6379:6379" ]
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
@@ -28,8 +28,8 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    volumes: [ollama_models:/root/.ollama]
-    ports: ["11434:11434"]
+    volumes: [ ollama_models:/root/.ollama ]
+    ports: [ "11434:11434" ]
 
   php:
     container_name: php
@@ -47,15 +47,18 @@ services:
     ports:
       - "8080:8080"
 
-#  capture:
-#    build: ./docker/services/capture
-#    network_mode: host
-#    cap_add: [NET_RAW, NET_ADMIN]
-#    environment:
-#      DATABASE_URL: postgresql://siem:siempassword@localhost:5432/siem
-#      REDIS_URL: redis://localhost:6379
-#      BACKEND_URL: http://localhost:8000
-#    depends_on: [redis, postgres]
+  capture:
+    build:
+      context: .
+      dockerfile: ./docker/services/capture/Dockerfile
+    network_mode: host
+    cap_add: [ NET_RAW, NET_ADMIN ]
+    environment:
+      DATABASE_URL: postgresql://siem:siempassword@localhost:5432/siem
+      REDIS_URL: redis://localhost:6379
+      BACKEND_URL: http://localhost:8000
+      CAPTURE_MODE: live
+    depends_on: [ redis, postgres ]
 
   rules:
     build:
@@ -70,18 +73,18 @@ services:
       redis:
         condition: service_healthy
 
-#  agents:
-#    build: ./docker/services/agents
-#    environment:
-#      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem
-#      REDIS_URL: redis://redis:6379
-#      OLLAMA_URL: http://ollama:11434
-#    depends_on: [redis, postgres, ollama]
+  #  agents:
+  #    build: ./docker/services/agents
+  #    environment:
+  #      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem
+  #      REDIS_URL: redis://redis:6379
+  #      OLLAMA_URL: http://ollama:11434
+  #    depends_on: [redis, postgres, ollama]
 
-#  frontend:
-##    build: ./docker/frontend
-#    ports: ["3000:80"]
-#    depends_on: [php]
+  #  frontend:
+  ##    build: ./docker/frontend
+  #    ports: ["3000:80"]
+  #    depends_on: [php]
 
   adminer:
     image: adminer

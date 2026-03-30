@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import uuid
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
@@ -16,11 +15,11 @@ from typing import cast
 from loader import load_default_rules
 from types_internal import AlertDict, NetworkEvent, Rule, WindowEntry, WindowKey
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
-REDIS_URL: str = os.environ.get("REDIS_URL", "")
+DATABASE_URL: str = os.environ.get("DATABASE_URL", "postgresql://siem:siempassword@postgres:5432/siem")
+REDIS_URL: str = os.environ.get("REDIS_URL", "redis://redis:6379")
 
 # In-memory sliding window state
 windows: dict[WindowKey, deque[WindowEntry]] = {}
@@ -94,18 +93,16 @@ def insert_alert(
     event: NetworkEvent,
     related_ids: list[str],
 ) -> AlertDict:
-    alert_id: str = str(uuid.uuid4())
     cursor = conn.cursor()
     cursor.execute(
         """
         INSERT INTO alerts
-          (id, rule_id, rule_name, severity, timestamp, status,
+          (rule_id, rule_name, severity, timestamp, status,
            triggering_event_id, related_event_ids, ai_analysis, incident_id)
         VALUES
-          (%s, %s, %s, %s, NOW(), 'open', %s, %s::jsonb, NULL, NULL)
+          (%s, %s, %s, NOW(), 'open', %s, %s::jsonb, NULL, NULL)
         """,
         (
-            alert_id,
             rule["id"],
             rule["name"],
             rule["severity"],
@@ -117,7 +114,6 @@ def insert_alert(
     cursor.close()
 
     return {
-        "id": alert_id,
         "rule_id": rule["id"],
         "rule_name": rule["name"],
         "severity": rule["severity"],
@@ -142,6 +138,7 @@ async def run() -> None:
     log.info("Subscribed to traffic:events")
 
     last_reload: float = asyncio.get_event_loop().time()
+    packets_received: int = 0
 
     async for message in pubsub.listen():
         if message["type"] != "message":
@@ -159,6 +156,15 @@ async def run() -> None:
         except json.JSONDecodeError:
             log.warning("Received invalid JSON from traffic:events")
             continue
+
+        packets_received += 1
+        if packets_received % 10 == 0:
+            log.info(
+                "Received %d packets from Redis (last: %s -> %s %s)",
+                packets_received,
+                event.get("src_ip"), event.get("dst_ip"),
+                event.get("protocol"),
+            )
 
         rule: Rule
         for rule in rules:
