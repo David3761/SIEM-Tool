@@ -127,6 +127,9 @@ class TestAgent1BuildsPrompt:
             captured_prompts.append(prompt)
             return llm_response
 
+        redis_mock = AsyncMock()
+        redis_mock.publish = AsyncMock()
+
         with (
             patch.object(a1, "_fetch_alert", return_value=alert),
             patch.object(a1, "_fetch_related_events", return_value=[_make_event()]),
@@ -135,19 +138,7 @@ class TestAgent1BuildsPrompt:
             patch.object(a1, "_update_alert_analysis"),
             patch("agent1_threat_analyst.ollama_client.generate_json", side_effect=fake_generate_json),
         ):
-            redis_mock = AsyncMock()
-            redis_mock.publish = AsyncMock()
-            pubsub_mock = AsyncMock()
-
-            async def _listen():
-                yield {"type": "message", "data": json.dumps({"id": "alert-1"})}
-
-            pubsub_mock.listen = _listen
-            pubsub_mock.subscribe = AsyncMock()
-            redis_mock.pubsub = MagicMock(return_value=pubsub_mock)
-
-            with patch("agent1_threat_analyst.aioredis.from_url", return_value=redis_mock):
-                await a1.run()
+            await a1._handle_message({"id": "alert-1"}, redis_mock)
 
         assert len(captured_prompts) == 1
         prompt = captured_prompts[0]
@@ -177,6 +168,9 @@ class TestAgent1UpdatesAnalysis:
         def fake_update(alert_id, analysis):
             stored.append(analysis)
 
+        redis_mock = AsyncMock()
+        redis_mock.publish = AsyncMock()
+
         with (
             patch.object(a1, "_fetch_alert", return_value=alert),
             patch.object(a1, "_fetch_related_events", return_value=[]),
@@ -185,19 +179,7 @@ class TestAgent1UpdatesAnalysis:
             patch.object(a1, "_update_alert_analysis", side_effect=fake_update),
             patch("agent1_threat_analyst.ollama_client.generate_json", return_value=llm_response),
         ):
-            redis_mock = AsyncMock()
-            redis_mock.publish = AsyncMock()
-            pubsub_mock = AsyncMock()
-
-            async def _listen():
-                yield {"type": "message", "data": json.dumps({"id": "alert-1"})}
-
-            pubsub_mock.listen = _listen
-            pubsub_mock.subscribe = AsyncMock()
-            redis_mock.pubsub = MagicMock(return_value=pubsub_mock)
-
-            with patch("agent1_threat_analyst.aioredis.from_url", return_value=redis_mock):
-                await a1.run()
+            await a1._handle_message({"id": "alert-1"}, redis_mock)
 
         assert len(stored) == 1
         saved = stored[0]
@@ -217,6 +199,9 @@ class TestAgent1HandlesOllamaException:
         def fake_update(alert_id, analysis):
             stored.append(analysis)
 
+        redis_mock = AsyncMock()
+        redis_mock.publish = AsyncMock()
+
         with (
             patch.object(a1, "_fetch_alert", return_value=alert),
             patch.object(a1, "_fetch_related_events", return_value=[]),
@@ -228,19 +213,7 @@ class TestAgent1HandlesOllamaException:
                 side_effect=RuntimeError("Ollama connection refused"),
             ),
         ):
-            redis_mock = AsyncMock()
-            redis_mock.publish = AsyncMock()
-            pubsub_mock = AsyncMock()
-
-            async def _listen():
-                yield {"type": "message", "data": json.dumps({"id": "alert-1"})}
-
-            pubsub_mock.listen = _listen
-            pubsub_mock.subscribe = AsyncMock()
-            redis_mock.pubsub = MagicMock(return_value=pubsub_mock)
-
-            with patch("agent1_threat_analyst.aioredis.from_url", return_value=redis_mock):
-                await a1.run()
+            await a1._handle_message({"id": "alert-1"}, redis_mock)
 
         assert len(stored) == 1
         err = stored[0]
@@ -263,6 +236,9 @@ class TestAgent1HandlesErrorDict:
 
         error_response = {"error": "parse failed", "analyzed_at": "2024-01-01T10:30:00+00:00"}
 
+        redis_mock = AsyncMock()
+        redis_mock.publish = AsyncMock()
+
         with (
             patch.object(a1, "_fetch_alert", return_value=alert),
             patch.object(a1, "_fetch_related_events", return_value=[]),
@@ -271,19 +247,7 @@ class TestAgent1HandlesErrorDict:
             patch.object(a1, "_update_alert_analysis", side_effect=fake_update),
             patch("agent1_threat_analyst.ollama_client.generate_json", return_value=error_response),
         ):
-            redis_mock = AsyncMock()
-            redis_mock.publish = AsyncMock()
-            pubsub_mock = AsyncMock()
-
-            async def _listen():
-                yield {"type": "message", "data": json.dumps({"id": "alert-1"})}
-
-            pubsub_mock.listen = _listen
-            pubsub_mock.subscribe = AsyncMock()
-            redis_mock.pubsub = MagicMock(return_value=pubsub_mock)
-
-            with patch("agent1_threat_analyst.aioredis.from_url", return_value=redis_mock):
-                await a1.run()
+            await a1._handle_message({"id": "alert-1"}, redis_mock)
 
         assert len(stored) == 1
         assert stored[0]["error"] == "parse failed"

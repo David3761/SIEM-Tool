@@ -168,6 +168,9 @@ async def _run_agent1_once(llm_response: dict) -> dict:
     def fake_update(alert_id, analysis):
         stored.append(analysis)
 
+    redis_mock = AsyncMock()
+    redis_mock.publish = AsyncMock()
+
     with (
         patch.object(a1, "_fetch_alert", return_value=_make_a1_alert()),
         patch.object(a1, "_fetch_related_events", return_value=[]),
@@ -176,21 +179,7 @@ async def _run_agent1_once(llm_response: dict) -> dict:
         patch.object(a1, "_update_alert_analysis", side_effect=fake_update),
         patch("agent1_threat_analyst.ollama_client.generate_json", return_value=llm_response),
     ):
-        redis_mock = AsyncMock()
-        redis_mock.publish = AsyncMock()
-        pubsub_mock = AsyncMock()
-
-        import json as _json
-
-        async def _listen():
-            yield {"type": "message", "data": _json.dumps({"id": "alert-eval-1"})}
-
-        pubsub_mock.listen = _listen
-        pubsub_mock.subscribe = AsyncMock()
-        redis_mock.pubsub = MagicMock(return_value=pubsub_mock)
-
-        with patch("agent1_threat_analyst.aioredis.from_url", return_value=redis_mock):
-            await a1.run()
+        await a1._handle_message({"id": "alert-eval-1"}, redis_mock)
 
     assert stored, "Agent 1 did not store any analysis"
     return stored[0]
