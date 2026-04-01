@@ -52,6 +52,9 @@ services:
     environment:
       DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem?serverVersion=16&charset=utf8
       REDIS_URL: redis://redis:6379
+      MERCURE_URL: http://mercure/.well-known/mercure
+      MERCURE_PUBLIC_URL: http://localhost:3000/.well-known/mercure
+      MERCURE_JWT_SECRET: "aceasta_este_o_cheie_foarte_lunga_si_sigura_pentru_siem_123456"
     ports:
       - "8080:8080"
 
@@ -86,7 +89,7 @@ services:
       context: ./services/agents
       dockerfile: Dockerfile
     environment:
-      POSTGRES_DSN: host=postgres dbname=siem user=siem password=siem
+      POSTGRES_DSN: host=postgres dbname=siem user=siem password=siempassword
       REDIS_URL: redis://redis:6379
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: llama3.2:3b
@@ -97,6 +100,38 @@ services:
         condition: service_healthy
       ollama:
         condition: service_healthy
+
+  relay:
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+    command: ["php", "bin/console", "app:mercure:relay"]
+    user: "appuser"
+    volumes:
+      - ./backend:/var/www/html
+    working_dir: /var/www/html
+    environment:
+      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem?serverVersion=16&charset=utf8
+      REDIS_URL: redis://redis:6379
+      MERCURE_URL: http://mercure/.well-known/mercure
+      MERCURE_PUBLIC_URL: http://localhost:3000/.well-known/mercure
+      MERCURE_JWT_SECRET: "aceasta_este_o_cheie_foarte_lunga_si_sigura_pentru_siem_123456"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mercure:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - nginx
 
   adminer:
     image: adminer

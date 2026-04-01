@@ -68,7 +68,7 @@ def _fetch_related_events(event_ids: list[str]) -> list[dict]:
     with _get_pg_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM network_events WHERE id = ANY(%s) LIMIT 10",
+                "SELECT * FROM network_events WHERE id = ANY(%s::uuid[]) LIMIT 10",
                 (event_ids,),
             )
             return cur.fetchall()
