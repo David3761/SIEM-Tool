@@ -28,8 +28,15 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    volumes: [ ollama_models:/root/.ollama ]
-    ports: [ "11434:11434" ]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   php:
     container_name: php
@@ -73,18 +80,22 @@ services:
       redis:
         condition: service_healthy
 
-  #  agents:
-  #    build: ./docker/services/agents
-  #    environment:
-  #      DATABASE_URL: postgresql://siem:siempassword@postgres:5432/siem
-  #      REDIS_URL: redis://redis:6379
-  #      OLLAMA_URL: http://ollama:11434
-  #    depends_on: [redis, postgres, ollama]
-
-  #  frontend:
-  ##    build: ./docker/frontend
-  #    ports: ["3000:80"]
-  #    depends_on: [php]
+  agents:
+    build:
+      context: ./services/agents
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_DSN: host=postgres dbname=siem user=siem password=siem
+      REDIS_URL: redis://redis:6379
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2:3b
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
 
   adminer:
     image: adminer
@@ -105,4 +116,4 @@ services:
 
 volumes:
   postgres_data:
-  ollama_models:
+  ollama_data:
