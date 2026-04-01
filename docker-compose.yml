@@ -33,10 +33,11 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 18
+      start_period: 30s
 
   php:
     container_name: php
