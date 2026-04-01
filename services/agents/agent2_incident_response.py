@@ -84,7 +84,7 @@ def _fetch_alerts_by_ids(alert_ids: list[str]) -> list[dict]:
     with _get_pg_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM alerts WHERE id = ANY(%s)",
+                "SELECT * FROM alerts WHERE id = ANY(%s::uuid[])",
                 (alert_ids,),
             )
             return [dict(r) for r in cur.fetchall()]
@@ -96,7 +96,7 @@ def _fetch_events_by_ids(event_ids: list[str]) -> list[dict]:
     with _get_pg_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM network_events WHERE id = ANY(%s)",
+                "SELECT * FROM network_events WHERE id = ANY(%s::uuid[])",
                 (event_ids,),
             )
             return [dict(r) for r in cur.fetchall()]

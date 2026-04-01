@@ -166,7 +166,7 @@ class FakeWebSocket extends EventTarget {
 export function installMockWebSocket() {
   // Only patch when trying to connect to the dev WS URL
   const OriginalWebSocket = window.WebSocket;
-  (window as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = class extends FakeWebSocket {
+  (window as unknown as { WebSocket: unknown }).WebSocket = class extends FakeWebSocket {
     constructor(url: string, protocols?: string | string[]) {
       if (url === "ws://localhost:8080") {
         super(url);
