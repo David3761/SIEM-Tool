@@ -17,9 +17,8 @@ class Incident
     public const SEVERITY_RANK = ['low' => 0, 'medium' => 1, 'high' => 2, 'critical' => 3];
 
     #[ORM\Id]
-    #[ORM\GeneratedValue]
-    #[ORM\Column(type: 'integer')]
-    private ?int $id = null;
+    #[ORM\Column(type: 'uuid')]
+    private ?string $id = null;
 
     #[ORM\Column(type: 'string', length: 255)]
     private string $title;
@@ -54,7 +53,7 @@ class Incident
         $this->status = 'open';
     }
 
-    public function getId(): int { return $this->id; }
+    public function getId(): string { return $this->id; }
     public function getTitle(): string { return $this->title; }
     public function setTitle(string $title): static { $this->title = $title; return $this; }
     public function getDescription(): ?string { return $this->description; }

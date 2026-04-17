@@ -52,6 +52,7 @@ class NetworkEvent(_NetworkEventRequired, total=False):
 # ── Alert (published to alerts:new and stored in PostgreSQL) ──────────────
 
 class AlertDict(TypedDict):
+    id: str
     rule_id: str
     rule_name: str
     severity: str
