@@ -21,6 +21,7 @@ export const TrafficTimeline: React.FC<TrafficTimelineProps> = ({ stats }) => {
     { name: "Internal", value: stats.internal_count, fill: "#a78bfa" },
   ];
 
+
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <h3 className="text-sm font-mono font-semibold text-slate-100 mb-1">Traffic Direction</h3>
