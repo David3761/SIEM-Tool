@@ -133,7 +133,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    environment:
+    environment:f
       - CHOKIDAR_USEPOLLING=true
     depends_on:
       - nginx
