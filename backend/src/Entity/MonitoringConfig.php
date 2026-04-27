@@ -12,8 +12,8 @@ use Doctrine\ORM\Mapping as ORM;
 class MonitoringConfig
 {
     #[ORM\Id]
-    #[ORM\Column(type: 'integer')]
-    private int $id = 1;
+    #[ORM\Column(type: 'uuid')]
+    private ?string $id = null;
 
     #[ORM\Column(type: 'json')]
     private array $monitoredInterfaces = [];
@@ -27,7 +27,7 @@ class MonitoringConfig
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $updatedAt = null;
 
-    public function getId(): int { return $this->id; }
+    public function getId(): string { return $this->id; }
     public function getMonitoredInterfaces(): array { return $this->monitoredInterfaces; }
     public function setMonitoredInterfaces(array $interfaces): static { $this->monitoredInterfaces = $interfaces; return $this; }
     public function getMonitoredSubnets(): array { return $this->monitoredSubnets; }
