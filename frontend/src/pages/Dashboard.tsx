@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, Database, Zap, Bell } from "lucide-react";
 import { getStats } from "../api/stats";
@@ -21,11 +21,13 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onWsConnect }) => {
   const [liveEvents, setLiveEvents] = useState<NetworkEvent[]>([]);
+  const pendingEvents = useRef<NetworkEvent[]>([]);
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["stats", "1h"],
     queryFn: () => getStats("1h"),
-    refetchInterval: 30_000,
+    refetchInterval: 10_000,
   });
 
   const { data: alertsData } = useQuery({
@@ -34,7 +36,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onWsConnect }) => {
   });
 
   const onTrafficEvent = useCallback((event: NetworkEvent) => {
-    setLiveEvents((prev) => [event, ...prev].slice(0, MAX_FEED_SIZE));
+    pendingEvents.current.push(event);
+    if (!flushTimer.current) {
+      flushTimer.current = setTimeout(() => {
+        const batch = pendingEvents.current.splice(0);
+        setLiveEvents((prev) => [...batch.reverse(), ...prev].slice(0, MAX_FEED_SIZE));
+        flushTimer.current = null;
+      }, 500);
+    }
   }, []);
 
   const onNewAlert = useCallback((alert: Alert) => {

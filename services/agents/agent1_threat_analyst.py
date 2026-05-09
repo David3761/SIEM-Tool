@@ -93,11 +93,13 @@ def _fetch_recent_alerts_by_src_ip(src_ip: str, current_alert_id: str) -> list[d
 
 
 def _update_alert_analysis(alert_id: str, ai_analysis: dict) -> None:
+    is_fp = ai_analysis.get("is_false_positive", False)
+    new_status = "false_positive" if is_fp else "acknowledged"
     with _get_pg_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE alerts SET ai_analysis = %s WHERE id = %s",
-                (json.dumps(ai_analysis), alert_id),
+                "UPDATE alerts SET ai_analysis = %s, status = %s WHERE id = %s",
+                (json.dumps(ai_analysis), new_status, alert_id),
             )
         conn.commit()
 
@@ -199,6 +201,8 @@ async def _handle_message(payload: dict, redis_client) -> None:
 
     _update_alert_analysis(alert_id, analysis)
 
+    is_fp = analysis.get("is_false_positive", False)
+    alert["status"] = "false_positive" if is_fp else "acknowledged"
     alert["ai_analysis"] = analysis
     publish_payload = {
         k: (v.isoformat() if hasattr(v, "isoformat") else

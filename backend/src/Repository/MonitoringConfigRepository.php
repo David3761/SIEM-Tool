@@ -17,6 +17,6 @@ class MonitoringConfigRepository extends ServiceEntityRepository
 
     public function getSingleton(): MonitoringConfig
     {
-        return $this->find(1) ?? new MonitoringConfig();
+        return $this->findOneBy([]) ?? new MonitoringConfig();
     }
 }

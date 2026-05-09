@@ -25,13 +25,13 @@ export const TrafficTimeline: React.FC<TrafficTimelineProps> = ({ stats }) => {
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <h3 className="text-sm font-mono font-semibold text-slate-100 mb-1">Traffic Direction</h3>
-      <p className="text-xs font-mono text-slate-500 mb-4">Last {stats.time_range}</p>
+      <p className="text-xs font-mono text-slate-500 mb-4">Last {stats.time_range ?? "1h"}</p>
       <div className="flex gap-6">
         {data.map((d) => (
           <div key={d.name} className="flex-1 text-center">
             <p className="text-xs font-mono text-slate-500 mb-1">{d.name}</p>
             <p className="text-lg font-mono font-bold" style={{ color: d.fill }}>
-              {d.value.toLocaleString()}
+              {(d.value ?? 0).toLocaleString()}
             </p>
           </div>
         ))}

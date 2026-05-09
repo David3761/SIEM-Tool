@@ -6,6 +6,7 @@ namespace App\Entity;
 
 use App\Repository\MonitoringConfigRepository;
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Uid\Uuid;
 
 #[ORM\Entity(repositoryClass: MonitoringConfigRepository::class)]
 #[ORM\Table(name: 'monitoring_config')]
@@ -17,6 +18,11 @@ class MonitoringConfig
 
     #[ORM\Column(type: 'json')]
     private array $monitoredInterfaces = [];
+
+    public function __construct()
+    {
+        $this->id = (string) Uuid::v4();
+    }
 
     #[ORM\Column(type: 'json')]
     private array $monitoredSubnets = [];

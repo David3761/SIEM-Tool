@@ -49,6 +49,7 @@ class Incident
 
     public function __construct()
     {
+        $this->id = (string) Uuid::v4();
         $this->createdAt = new \DateTimeImmutable();
         $this->status = 'open';
     }

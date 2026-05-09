@@ -16,6 +16,7 @@ export const Incidents: React.FC = () => {
   const { data: incidents, isLoading } = useQuery({
     queryKey: ["incidents"],
     queryFn: getIncidents,
+    refetchInterval: 15_000,
   });
 
   if (isLoading) {
@@ -29,7 +30,7 @@ export const Incidents: React.FC = () => {
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="bg-slate-800 rounded-lg border border-slate-700">
-        {!incidents || incidents.length === 0 ? (
+        {!Array.isArray(incidents) || incidents.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-slate-600">
             <FolderOpen size={32} className="mb-3 opacity-50" />
             <p className="font-mono text-sm">No incidents recorded</p>

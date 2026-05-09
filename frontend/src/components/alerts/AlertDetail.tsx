@@ -63,40 +63,44 @@ export const AlertDetail: React.FC<AlertDetailProps> = ({ alertId, onClose }) =>
               <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-2">
                 Triggering Event
               </p>
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 font-mono text-xs space-y-1.5">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Source</span>
-                  <span className="text-slate-200">
-                    {alert.triggering_event.src_ip}
-                    {alert.triggering_event.src_port
-                      ? `:${alert.triggering_event.src_port}`
-                      : ""}
-                  </span>
+              {alert.triggering_event ? (
+                <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 font-mono text-xs space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Source</span>
+                    <span className="text-slate-200">
+                      {alert.triggering_event.src_ip}
+                      {alert.triggering_event.src_port
+                        ? `:${alert.triggering_event.src_port}`
+                        : ""}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Destination</span>
+                    <span className="text-slate-200">
+                      {alert.triggering_event.dst_ip}
+                      {alert.triggering_event.dst_port
+                        ? `:${alert.triggering_event.dst_port}`
+                        : ""}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Protocol</span>
+                    <span className="text-cyan-400">{alert.triggering_event.protocol}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Direction</span>
+                    <span className="text-slate-300">{alert.triggering_event.direction}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Bytes</span>
+                    <span className="text-slate-300">
+                      {alert.triggering_event.bytes_sent.toLocaleString()}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Destination</span>
-                  <span className="text-slate-200">
-                    {alert.triggering_event.dst_ip}
-                    {alert.triggering_event.dst_port
-                      ? `:${alert.triggering_event.dst_port}`
-                      : ""}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Protocol</span>
-                  <span className="text-cyan-400">{alert.triggering_event.protocol}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Direction</span>
-                  <span className="text-slate-300">{alert.triggering_event.direction}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Bytes</span>
-                  <span className="text-slate-300">
-                    {alert.triggering_event.bytes_sent.toLocaleString()}
-                  </span>
-                </div>
-              </div>
+              ) : (
+                <p className="text-xs font-mono text-slate-600">Event data unavailable</p>
+              )}
             </div>
 
             {/* Related events */}

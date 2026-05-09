@@ -29,9 +29,9 @@ DEFAULT_CONFIG: dict = {
 
 INSERT_SQL = """
 INSERT INTO network_events
-  (timestamp, src_ip, dst_ip, src_port, dst_port,
+  (id, timestamp, src_ip, dst_ip, src_port, dst_port,
    protocol, bytes_sent, direction, interface, flags)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -75,7 +75,7 @@ def bulk_insert(conn: psycopg2.extensions.connection, events: list[dict]) -> Non
         return
     rows = [
         (
-            e["timestamp"], e["src_ip"], e["dst_ip"],
+            e["id"], e["timestamp"], e["src_ip"], e["dst_ip"],
             e.get("src_port"), e.get("dst_port"), e["protocol"],
             e["bytes_sent"], e["direction"], e["interface"],
             e.get("flags"),
