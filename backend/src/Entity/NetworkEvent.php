@@ -13,9 +13,8 @@ use Symfony\Component\Uid\Uuid;
 class NetworkEvent
 {
     #[ORM\Id]
-    #[ORM\GeneratedValue]
-    #[ORM\Column(type: 'integer')]
-    private ?int $id = null;
+    #[ORM\Column(type: 'uuid')]
+    private ?string $id = null;
 
     #[ORM\Column(type: 'datetime_immutable')]
     private \DateTimeImmutable $timestamp;
@@ -52,7 +51,7 @@ class NetworkEvent
         $this->timestamp = new \DateTimeImmutable();
     }
 
-    public function getId(): int { return $this->id; }
+    public function getId(): string { return $this->id; }
     public function getTimestamp(): \DateTimeImmutable { return $this->timestamp; }
     public function setTimestamp(\DateTimeImmutable $timestamp): static { $this->timestamp = $timestamp; return $this; }
     public function getSrcIp(): string { return $this->srcIp; }

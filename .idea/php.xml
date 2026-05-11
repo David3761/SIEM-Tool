@@ -72,6 +72,9 @@
       <path value="$PROJECT_DIR$/backend/vendor/symfony/http-client" />
       <path value="$PROJECT_DIR$/backend/vendor/symfony/web-link" />
       <path value="$PROJECT_DIR$/backend/vendor/lcobucci/jwt" />
+      <path value="$PROJECT_DIR$/backend/vendor/nelmio/cors-bundle" />
+      <path value="$PROJECT_DIR$/backend/vendor/psr/http-message" />
+      <path value="$PROJECT_DIR$/backend/vendor/predis/predis" />
     </include_path>
   </component>
   <component name="PhpProjectSharedConfiguration" php_language_level="8.4" />

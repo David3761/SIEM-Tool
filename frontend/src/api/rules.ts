@@ -3,7 +3,7 @@ import type { Rule } from "../types";
 
 export const getRules = async (): Promise<Rule[]> => {
   const { data } = await client.get("/api/rules");
-  return data;
+  return data.items ?? data;
 };
 
 export const createRule = async (

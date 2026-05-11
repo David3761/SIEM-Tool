@@ -289,7 +289,7 @@ export const Settings: React.FC = () => {
           <div className="flex items-center justify-center py-8">
             <LoadingSpinner />
           </div>
-        ) : !rules || rules.length === 0 ? (
+        ) : !Array.isArray(rules) || rules.length === 0 ? (
           <p className="text-center py-8 text-slate-600 font-mono text-sm">No rules configured</p>
         ) : (
           <table className="w-full">
@@ -309,13 +309,20 @@ export const Settings: React.FC = () => {
               {rules.map((rule) => (
                 <tr
                   key={rule.id}
-                  className="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors"
+                  className={`border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors ${!rule.enabled ? "opacity-50" : ""}`}
                 >
                   <td className="px-3 py-2.5">
                     <SeverityBadge severity={rule.severity} />
                   </td>
                   <td className="px-3 py-2.5">
-                    <p className="text-sm font-mono text-slate-200">{rule.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-mono text-slate-200">{rule.name}</p>
+                      {!rule.enabled && (
+                        <span className="px-1.5 py-0.5 bg-slate-700 rounded text-xs font-mono text-slate-500">
+                          disabled
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs font-mono text-slate-500 mt-0.5">{rule.description}</p>
                   </td>
                   <td className="px-3 py-2.5 text-xs font-mono text-slate-400">{rule.rule_type}</td>

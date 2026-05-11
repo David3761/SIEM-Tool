@@ -68,12 +68,12 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis }) =>
           <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider">
             Confidence
           </p>
-          <span className="text-xs font-mono text-slate-300">{analysis.confidence}%</span>
+          <span className="text-xs font-mono text-slate-300">{analysis.confidence ?? 0}%</span>
         </div>
         <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
           <div
             className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-500"
-            style={{ width: `${analysis.confidence}%` }}
+            style={{ width: `${analysis.confidence ?? 0}%` }}
           />
         </div>
         {analysis.is_false_positive_likely && (
@@ -93,13 +93,13 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis }) =>
       </div>
 
       {/* IOCs */}
-      {analysis.iocs.length > 0 && (
+      {(analysis.iocs ?? []).length > 0 && (
         <div>
           <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-2">
             IOCs
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {analysis.iocs.map((ioc, i) => (
+            {(analysis.iocs ?? []).map((ioc, i) => (
               <code
                 key={i}
                 className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs font-mono text-slate-300"

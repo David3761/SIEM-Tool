@@ -38,7 +38,9 @@ export const AlertRow: React.FC<AlertRowProps> = ({ alert, onSelect }) => {
       </td>
       <td className="px-4 py-3">
         <span className="text-xs font-mono text-slate-400">
-          {alert.triggering_event.src_ip} → {alert.triggering_event.dst_ip}
+          {alert.triggering_event
+            ? `${alert.triggering_event.src_ip} → ${alert.triggering_event.dst_ip}`
+            : "—"}
         </span>
       </td>
       <td className="px-4 py-3">

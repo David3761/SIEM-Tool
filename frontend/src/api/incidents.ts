@@ -3,7 +3,7 @@ import type { Incident } from "../types";
 
 export const getIncidents = async (): Promise<Incident[]> => {
   const { data } = await client.get("/api/incidents");
-  return data;
+  return data.items ?? data;
 };
 
 export const getIncident = async (id: string): Promise<Incident> => {

@@ -15,7 +15,7 @@ interface TopIPsChartProps {
 }
 
 export const TopIPsChart: React.FC<TopIPsChartProps> = ({ data }) => {
-  const chartData = data.slice(0, 8).map((d) => ({
+  const chartData = (data ?? []).slice(0, 8).map((d) => ({
     ip: d.ip,
     events: d.event_count,
   }));

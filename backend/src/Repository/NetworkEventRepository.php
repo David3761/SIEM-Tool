@@ -51,21 +51,21 @@ class NetworkEventRepository extends ServiceEntityRepository
         $conn = $this->getEntityManager()->getConnection();
 
         $topSrcIps = $conn->fetchAllAssociative(
-            'SELECT src_ip, COUNT(*) as count FROM network_events WHERE timestamp >= :since GROUP BY src_ip ORDER BY count DESC LIMIT 10',
+            'SELECT src_ip as ip, COUNT(*) as event_count, SUM(bytes_sent) as bytes FROM network_events WHERE timestamp >= :since GROUP BY src_ip ORDER BY event_count DESC LIMIT 10',
             ['since' => $since->format('Y-m-d H:i:s')]
         );
 
         $topDstIps = $conn->fetchAllAssociative(
-            'SELECT dst_ip, COUNT(*) as count FROM network_events WHERE timestamp >= :since GROUP BY dst_ip ORDER BY count DESC LIMIT 10',
+            'SELECT dst_ip as ip, COUNT(*) as event_count, SUM(bytes_sent) as bytes FROM network_events WHERE timestamp >= :since GROUP BY dst_ip ORDER BY event_count DESC LIMIT 10',
             ['since' => $since->format('Y-m-d H:i:s')]
         );
 
-        $topPorts = $conn->fetchAllAssociative(
-            'SELECT COALESCE(dst_port, src_port) as port, protocol, COUNT(*) as count FROM network_events WHERE timestamp >= :since AND (dst_port IS NOT NULL OR src_port IS NOT NULL) GROUP BY port, protocol ORDER BY count DESC LIMIT 10',
+        $topPortsRaw = $conn->fetchAllAssociative(
+            'SELECT COALESCE(dst_port, src_port) as port, protocol, COUNT(*) as event_count FROM network_events WHERE timestamp >= :since AND (dst_port IS NOT NULL OR src_port IS NOT NULL) GROUP BY port, protocol ORDER BY event_count DESC LIMIT 10',
             ['since' => $since->format('Y-m-d H:i:s')]
         );
 
-        $protocolBreakdown = $conn->fetchAllAssociative(
+        $protocolBreakdownRaw = $conn->fetchAllAssociative(
             'SELECT protocol, COUNT(*) as count FROM network_events WHERE timestamp >= :since GROUP BY protocol',
             ['since' => $since->format('Y-m-d H:i:s')]
         );
@@ -89,9 +89,41 @@ class NetworkEventRepository extends ServiceEntityRepository
             $directions[$row['direction']] = (int)$row['count'];
         }
 
+        // Protocol breakdown conversion to Record<string, number>
+        $protocolBreakdown = [];
+        foreach ($protocolBreakdownRaw as $row) {
+            $protocolBreakdown[$row['protocol']] = (int) $row['count'];
+        }
+
+        // Fix port cast
+        $topPorts = array_map(function($row) {
+            return [
+                'port' => (int) $row['port'],
+                'protocol' => $row['protocol'],
+                'event_count' => (int) $row['event_count']
+            ];
+        }, $topPortsRaw);
+
+        // Cast sizes appropriately
+        $topSourceIps = array_map(function($row) {
+            return [
+                'ip' => $row['ip'],
+                'event_count' => (int) $row['event_count'],
+                'bytes' => (int) ($row['bytes'] ?? 0)
+            ];
+        }, $topSrcIps);
+
+        $topDestinationIps = array_map(function($row) {
+            return [
+                'ip' => $row['ip'],
+                'event_count' => (int) $row['event_count'],
+                'bytes' => (int) ($row['bytes'] ?? 0)
+            ];
+        }, $topDstIps);
+
         return [
-            'top_src_ips' => $topSrcIps,
-            'top_dst_ips' => $topDstIps,
+            'top_source_ips' => $topSourceIps,
+            'top_destination_ips' => $topDestinationIps,
             'top_ports' => $topPorts,
             'protocol_breakdown' => $protocolBreakdown,
             'total_events' => (int)($totals['total_events'] ?? 0),

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
@@ -93,16 +94,18 @@ def insert_alert(
     event: NetworkEvent,
     related_ids: list[str],
 ) -> AlertDict:
+    alert_id: str = str(uuid.uuid4())
     cursor = conn.cursor()
     cursor.execute(
         """
         INSERT INTO alerts
-          (rule_id, rule_name, severity, timestamp, status,
+          (id, rule_id, rule_name, severity, timestamp, status,
            triggering_event_id, related_event_ids, ai_analysis, incident_id)
         VALUES
-          (%s, %s, %s, NOW(), 'open', %s, %s::jsonb, NULL, NULL)
+          (%s, %s, %s, %s, NOW(), 'open', %s, %s::jsonb, NULL, NULL)
         """,
         (
+            alert_id,
             rule["id"],
             rule["name"],
             rule["severity"],
@@ -114,6 +117,7 @@ def insert_alert(
     cursor.close()
 
     return {
+        "id": alert_id,
         "rule_id": rule["id"],
         "rule_name": rule["name"],
         "severity": rule["severity"],

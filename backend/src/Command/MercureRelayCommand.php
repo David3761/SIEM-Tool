@@ -28,7 +28,10 @@ class MercureRelayCommand extends Command
 
         $output->writeln('<info>Relay pornit. Ascult Redis...</info>');
 
-        // Predis subscribe e blocking — perfect pentru o comandă dedicată
+        // Throttle traffic events: max 10/sec toward Mercure
+        $lastTrafficPublish = 0.0;
+        $trafficIntervalMs  = 100; // ms between traffic publishes
+
         $pubsub = $redis->pubSubLoop();
         $pubsub->subscribe('traffic:events', 'alerts:new', 'alerts:updated');
 
@@ -39,14 +42,21 @@ class MercureRelayCommand extends Command
 
             $data = json_decode($message->payload, true) ?? [];
 
-            match ($message->channel) {
-                'traffic:events' => $this->publisher->publishTrafficEvent($data),
-                'alerts:new'     => $this->publisher->publishNewAlert($data),
-                'alerts:updated' => $this->publisher->publishAlertUpdated($data),
-                default          => null,
-            };
-
-            $output->writeln("[Relay] {$message->channel} → Mercure");
+            if ($message->channel === 'traffic:events') {
+                $nowMs = (int)(microtime(true) * 1000);
+                if ($nowMs - $lastTrafficPublish < $trafficIntervalMs) {
+                    continue; // drop — throttled
+                }
+                $lastTrafficPublish = $nowMs;
+                $this->publisher->publishTrafficEvent($data);
+            } else {
+                match ($message->channel) {
+                    'alerts:new'     => $this->publisher->publishNewAlert($data),
+                    'alerts:updated' => $this->publisher->publishAlertUpdated($data),
+                    default          => null,
+                };
+                $output->writeln("[Relay] {$message->channel} → Mercure");
+            }
         }
 
         return Command::SUCCESS;

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useState, useEffect, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { getEvents, type EventsParams } from "../api/events";
+import { useWebSocket } from "../hooks/useWebSocket";
 import { Pagination } from "../components/shared/Pagination";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 
@@ -63,10 +64,19 @@ export const Events: React.FC = () => {
     ...(debounced.port && { port: Number(debounced.port) }),
   };
 
+  const queryClient = useQueryClient();
+
   const { data, isLoading } = useQuery({
     queryKey: ["events", queryParams],
     queryFn: () => getEvents(queryParams),
+    refetchInterval: 5_000,
   });
+
+  const onTrafficEvent = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["events"] });
+  }, [queryClient]);
+
+  useWebSocket({ onTrafficEvent });
 
   const update = (key: keyof Filters) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFilters((prev) => ({ ...prev, [key]: e.target.value }));

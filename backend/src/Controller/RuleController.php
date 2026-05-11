@@ -23,7 +23,6 @@ class RuleController extends BaseApiController
     public function list(Request $request): JsonResponse
     {
         $qb = $this->ruleRepository->createQueryBuilder('r')
-            ->where('r.enabled = true')
             ->orderBy('r.createdAt', 'DESC');
 
         return $this->json($this->paginate($qb, $request));
@@ -84,8 +83,7 @@ class RuleController extends BaseApiController
             return $this->jsonError('Rule not found', 404);
         }
 
-        // Soft delete
-        $rule->setEnabled(false);
+        $this->em->remove($rule);
         $this->em->flush();
 
         return $this->json(null, 204);

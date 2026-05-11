@@ -16,9 +16,8 @@ class Alert
     public const SEVERITIES = ['low', 'medium', 'high', 'critical'];
 
     #[ORM\Id]
-    #[ORM\GeneratedValue]
-    #[ORM\Column(type: 'integer')]
-    private ?int $id = null;
+    #[ORM\Column(type: 'uuid')]
+    private ?string $id = null;
 
     #[ORM\Column(type: 'string', length: 100)]
     private string $ruleId;
@@ -53,7 +52,7 @@ class Alert
         $this->status = 'open';
     }
 
-    public function getId(): int { return $this->id; }
+    public function getId(): string { return $this->id; }
     public function getRuleId(): string { return $this->ruleId; }
     public function setRuleId(string $ruleId): static { $this->ruleId = $ruleId; return $this; }
     public function getRuleName(): string { return $this->ruleName; }
