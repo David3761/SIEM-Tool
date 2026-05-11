@@ -7,7 +7,7 @@ interface MercureHandlers {
   onAlertUpdated?: (alert: Alert) => void;
 }
 
-const MERCURE_URL = "http://localhost:3000/.well-known/mercure";
+const MERCURE_URL = import.meta.env.VITE_MERCURE_URL ?? "http://localhost:3000/.well-known/mercure";
 const TOPICS = ["traffic/events", "alerts/new", "alerts/updated"];
 
 export function useWebSocket(handlers: MercureHandlers): { isConnected: boolean } {

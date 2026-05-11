@@ -20,6 +20,7 @@ export interface AIAnalysis {
   confidence: number;
   is_false_positive_likely: boolean;
   recommended_action: string;
+  risk_score: number;
   iocs: string[];
   analyzed_at: string;
   error?: string;

@@ -27,7 +27,7 @@ windows: dict[WindowKey, deque[WindowEntry]] = {}
 last_alert: dict[WindowKey, datetime] = {}
 
 ALERT_COOLDOWN_SECONDS: int = 60
-RULE_RELOAD_INTERVAL: int = 300  # 5 minutes
+RULE_RELOAD_INTERVAL: int = 60  # 1 minute
 
 
 def get_db_conn() -> psycopg2.extensions.connection:

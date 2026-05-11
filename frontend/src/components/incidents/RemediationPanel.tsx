@@ -1,7 +1,7 @@
 import React from "react";
 import type { AIRemediation } from "../../types";
 import { LoadingSpinner } from "../shared/LoadingSpinner";
-import { Info, Shield } from "lucide-react";
+import { AlertTriangle, Bot, Info, Shield } from "lucide-react";
 
 interface RemediationPanelProps {
   remediation: AIRemediation | null;
@@ -21,83 +21,135 @@ function stepNumColor(step: string): string {
   return "text-slate-400 bg-slate-700";
 }
 
+function AgentHeader({ analyzedAt }: { analyzedAt?: string }) {
+  return (
+    <div className="flex items-center justify-between py-2 px-3 bg-slate-900/60 border border-slate-700/50 rounded-lg">
+      <div className="flex items-center gap-2">
+        <Bot size={13} className="text-purple-400" />
+        <span className="text-xs font-mono font-semibold text-purple-400">Agent 2 — Incident Response</span>
+        <span className="text-xs font-mono text-slate-500">generated this plan</span>
+      </div>
+      {analyzedAt && (
+        <span className="text-xs font-mono text-slate-600">
+          {new Date(analyzedAt).toLocaleTimeString()}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export const RemediationPanel: React.FC<RemediationPanelProps> = ({ remediation }) => {
-  if (remediation === null) {
+  if (remediation === null || remediation === undefined) {
     return (
-      <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-500">
-        <LoadingSpinner size="lg" />
-        <p className="text-sm font-mono">Generating AI remediation plan…</p>
+      <div className="space-y-4">
+        <AgentHeader />
+        <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-500">
+          <LoadingSpinner size="lg" />
+          <p className="text-sm font-mono">Building remediation plan…</p>
+        </div>
       </div>
     );
   }
 
+  if ((remediation as { error?: string }).error) {
+    return (
+      <div className="space-y-4">
+        <AgentHeader analyzedAt={remediation.analyzed_at} />
+        <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4 flex gap-3">
+          <AlertTriangle size={16} className="text-yellow-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-mono font-semibold text-yellow-400">Plan Generation Failed</p>
+            <p className="text-sm font-mono text-yellow-300/80 mt-1">
+              {(remediation as { error?: string }).error}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const tactics = remediation.mitre_tactics ?? [];
+  const techniques = remediation.mitre_techniques ?? [];
+  const steps = remediation.remediation_steps ?? [];
+  const iocs = remediation.iocs ?? [];
+
   return (
     <div className="space-y-6">
+      <AgentHeader analyzedAt={remediation.analyzed_at} />
+
       {/* Summary */}
-      <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-4 flex gap-3">
-        <Info size={16} className="text-blue-400 mt-0.5 shrink-0" />
-        <p className="text-sm font-mono text-blue-200/80 leading-relaxed">{remediation.summary}</p>
-      </div>
+      {remediation.summary && (
+        <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-4 flex gap-3">
+          <Info size={16} className="text-blue-400 mt-0.5 shrink-0" />
+          <p className="text-sm font-mono text-blue-200/80 leading-relaxed">{remediation.summary}</p>
+        </div>
+      )}
 
       {/* Attack pattern + MITRE */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <Shield size={14} className="text-cyan-400" />
-          <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider">
-            Attack Pattern
-          </p>
+      {(remediation.attack_pattern || tactics.length > 0 || techniques.length > 0) && (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Shield size={14} className="text-cyan-400" />
+            <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider">
+              Attack Pattern
+            </p>
+          </div>
+          {remediation.attack_pattern && (
+            <p className="text-sm font-mono text-slate-300 mb-3">{remediation.attack_pattern}</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {tactics.map((t) => (
+              <span
+                key={t}
+                className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-xs font-mono text-slate-200"
+              >
+                {t}
+              </span>
+            ))}
+            {techniques.map((t) => (
+              <span
+                key={t}
+                className="px-2 py-1 bg-cyan-900/30 border border-cyan-700/50 rounded text-xs font-mono text-cyan-300"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
         </div>
-        <p className="text-sm font-mono text-slate-300 mb-3">{remediation.attack_pattern}</p>
-        <div className="flex flex-wrap gap-2">
-          {remediation.mitre_tactics.map((t) => (
-            <span
-              key={t}
-              className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-xs font-mono text-slate-200"
-            >
-              {t}
-            </span>
-          ))}
-          {remediation.mitre_techniques.map((t) => (
-            <span
-              key={t}
-              className="px-2 py-1 bg-cyan-900/30 border border-cyan-700/50 rounded text-xs font-mono text-cyan-300"
-            >
-              {t}
-            </span>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* Remediation Steps */}
-      <div>
-        <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-3">
-          Remediation Steps
-        </p>
-        <ol className="space-y-2">
-          {remediation.remediation_steps.map((step, i) => (
-            <li
-              key={i}
-              className={`flex gap-3 p-3 rounded-lg border ${stepBg(step)}`}
-            >
-              <span
-                className={`text-xs font-mono font-bold w-5 h-5 rounded flex items-center justify-center shrink-0 mt-0.5 ${stepNumColor(step)}`}
+      {steps.length > 0 && (
+        <div>
+          <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-3">
+            Remediation Steps
+          </p>
+          <ol className="space-y-2">
+            {steps.map((step, i) => (
+              <li
+                key={i}
+                className={`flex gap-3 p-3 rounded-lg border ${stepBg(step)}`}
               >
-                {i + 1}
-              </span>
-              <p className="text-sm font-mono text-slate-200 leading-relaxed">{step}</p>
-            </li>
-          ))}
-        </ol>
-      </div>
+                <span
+                  className={`text-xs font-mono font-bold w-5 h-5 rounded flex items-center justify-center shrink-0 mt-0.5 ${stepNumColor(step)}`}
+                >
+                  {i + 1}
+                </span>
+                <p className="text-sm font-mono text-slate-200 leading-relaxed">{step}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       {/* IOCs */}
-      {remediation.iocs.length > 0 && (
+      {iocs.length > 0 && (
         <div>
           <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-2">
-            IOCs
+            Indicators of Compromise
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {remediation.iocs.map((ioc, i) => (
+            {iocs.map((ioc, i) => (
               <code
                 key={i}
                 className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs font-mono text-slate-300"

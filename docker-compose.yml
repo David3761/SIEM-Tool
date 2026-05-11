@@ -54,7 +54,7 @@ services:
       REDIS_URL: redis://redis:6379
       MERCURE_URL: http://mercure/.well-known/mercure
       MERCURE_PUBLIC_URL: http://localhost:3000/.well-known/mercure
-      MERCURE_JWT_SECRET: "aceasta_este_o_cheie_foarte_lunga_si_sigura_pentru_siem_123456"
+      MERCURE_JWT_SECRET: ${MERCURE_JWT_SECRET}
     ports:
       - "8080:8080"
 
@@ -115,7 +115,7 @@ services:
       REDIS_URL: redis://redis:6379
       MERCURE_URL: http://mercure/.well-known/mercure
       MERCURE_PUBLIC_URL: http://localhost:3000/.well-known/mercure
-      MERCURE_JWT_SECRET: "aceasta_este_o_cheie_foarte_lunga_si_sigura_pentru_siem_123456"
+      MERCURE_JWT_SECRET: ${MERCURE_JWT_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,8 +147,8 @@ services:
     image: dunglas/mercure
     environment:
       SERVER_NAME: ":80"
-      MERCURE_PUBLISHER_JWT_KEY: "aceasta_este_o_cheie_foarte_lunga_si_sigura_pentru_siem_123456"
-      MERCURE_SUBSCRIBER_JWT_KEY: "aceasta_este_o_cheie_foarte_lunga_si_sigura_pentru_siem_123456"
+      MERCURE_PUBLISHER_JWT_KEY: ${MERCURE_JWT_SECRET}
+      MERCURE_SUBSCRIBER_JWT_KEY: ${MERCURE_JWT_SECRET}
       MERCURE_EXTRA_DIRECTIVES: |
         cors_origins *
         anonymous

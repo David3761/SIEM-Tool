@@ -152,6 +152,7 @@ const fullAnalysis: AIAnalysis = {
   recommended_action:
     "Block 192.168.1.105 at the perimeter firewall immediately. Investigate whether this IP belongs to an internal asset performing authorized scanning. If unauthorized, escalate to Incident Response.",
   iocs: ["192.168.1.105", "port-scan", "nmap-signature", "T1046"],
+  risk_score: 7,
   analyzed_at: new Date(Date.now() - 30000).toISOString(),
 };
 
@@ -167,6 +168,7 @@ const bruteForceAnalysis: AIAnalysis = {
   recommended_action:
     "Immediately block 203.0.113.42 at firewall. Enable fail2ban if not already active. Audit SSH logs for any successful logins from this IP. Consider disabling password authentication in favor of key-based auth.",
   iocs: ["203.0.113.42", "ssh-brute-force", "mirai-pattern", "T1110.001"],
+  risk_score: 5,
   analyzed_at: new Date(Date.now() - 120000).toISOString(),
 };
 
@@ -182,6 +184,7 @@ const rdpAnalysis: AIAnalysis = {
   recommended_action:
     "Block 198.51.100.77 immediately. Disable external RDP or move behind VPN. Audit all recent successful RDP sessions. Check for lateral movement indicators.",
   iocs: ["198.51.100.77", "rdp-attack", "ransomware-c2", "T1133"],
+  risk_score: 3,
   analyzed_at: new Date(Date.now() - 300000).toISOString(),
 };
 
@@ -271,6 +274,7 @@ export const mockAlerts: Alert[] = [
       is_false_positive_likely: true,
       recommended_action: "Identify the source host and review monitoring configuration.",
       iocs: ["172.16.0.20"],
+      risk_score: 4,
       analyzed_at: new Date(Date.now() - 45 * 60000).toISOString(),
     },
     incident_id: null,
@@ -293,6 +297,7 @@ export const mockAlerts: Alert[] = [
       is_false_positive_likely: false,
       recommended_action: "Block outbound DNS to non-authoritative resolvers. Inspect DNS logs for domain generation algorithm patterns. Consider DNS sinkholes.",
       iocs: ["10.0.0.8", "dns-tunnel", "T1048.003"],
+      risk_score: 7,
       analyzed_at: new Date(Date.now() - 60 * 60000).toISOString(),
     },
     incident_id: null,
@@ -315,6 +320,7 @@ export const mockAlerts: Alert[] = [
       is_false_positive_likely: false,
       recommended_action: "Isolate host 10.0.0.12 immediately. Preserve forensic image. Review all authentication logs from this host. Check for persistence mechanisms.",
       iocs: ["10.0.0.12", "lateral-movement", "T1021"],
+      risk_score: 9,
       analyzed_at: new Date(Date.now() - 85 * 60000).toISOString(),
     },
     incident_id: "inc-001",

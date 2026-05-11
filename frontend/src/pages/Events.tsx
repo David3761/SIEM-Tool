@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { getEvents, type EventsParams } from "../api/events";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { Pagination } from "../components/shared/Pagination";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
+import { IpLabel } from "../components/shared/IpLabel";
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -21,6 +22,31 @@ interface Filters {
   protocol: string;
   direction: string;
   port: string;
+  from: string;
+  to: string;
+}
+
+const DEFAULT_FILTERS: Filters = {
+  src_ip: "", dst_ip: "", protocol: "", direction: "", port: "", from: "", to: "",
+};
+
+const TIME_RANGES = [
+  { label: "5m", minutes: 5 },
+  { label: "15m", minutes: 15 },
+  { label: "1h", minutes: 60 },
+  { label: "6h", minutes: 360 },
+];
+
+function getFromIso(minutes: number): string {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
+function activeRangeLabel(from: string): string | null {
+  for (const r of TIME_RANGES) {
+    const diff = Math.abs(new Date(from).getTime() - new Date(getFromIso(r.minutes)).getTime());
+    if (diff < 60_000) return r.label;
+  }
+  return null;
 }
 
 const PROTOCOL_COLORS: Record<string, string> = {
@@ -44,13 +70,7 @@ function formatBytes(bytes: number): string {
 
 export const Events: React.FC = () => {
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<Filters>({
-    src_ip: "",
-    dst_ip: "",
-    protocol: "",
-    direction: "",
-    port: "",
-  });
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
   const debounced = useDebounce(filters, 400);
 
@@ -62,6 +82,8 @@ export const Events: React.FC = () => {
     ...(debounced.protocol && { protocol: debounced.protocol }),
     ...(debounced.direction && { direction: debounced.direction }),
     ...(debounced.port && { port: Number(debounced.port) }),
+    ...(debounced.from && { from: debounced.from }),
+    ...(debounced.to && { to: debounced.to }),
   };
 
   const queryClient = useQueryClient();
@@ -83,13 +105,23 @@ export const Events: React.FC = () => {
     setPage(1);
   };
 
+  const setFrom = (minutes: number, label: string) => {
+    const current = activeRangeLabel(filters.from);
+    setFilters((prev) => ({ ...prev, from: current === label ? "" : getFromIso(minutes), to: "" }));
+    setPage(1);
+  };
+
+  const hasActiveFilters = Object.values(filters).some(Boolean);
+
   const inputClass =
     "bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50";
+
+  const activeRange = filters.from ? activeRangeLabel(filters.from) : null;
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-4">
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-3 items-center">
         <div className="relative">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
@@ -130,6 +162,34 @@ export const Events: React.FC = () => {
           <option value="outbound">Outbound</option>
           <option value="internal">Internal</option>
         </select>
+
+        {/* Time range quick-select */}
+        <div className="flex items-center gap-1">
+          {TIME_RANGES.map((r) => (
+            <button
+              key={r.label}
+              onClick={() => setFrom(r.minutes, r.label)}
+              className={`px-2.5 py-1.5 rounded-md text-xs font-mono border transition-colors ${
+                activeRange === r.label
+                  ? "bg-cyan-900/40 border-cyan-500/60 text-cyan-300"
+                  : "bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Clear all */}
+        {hasActiveFilters && (
+          <button
+            onClick={() => { setFilters(DEFAULT_FILTERS); setPage(1); }}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-slate-800 border border-slate-700 text-xs font-mono text-slate-500 hover:text-red-400 hover:border-red-900/50 transition-colors"
+          >
+            <X size={12} />
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -177,13 +237,13 @@ export const Events: React.FC = () => {
                         <td className={`px-4 py-2 font-semibold ${PROTOCOL_COLORS[event.protocol] ?? "text-slate-400"}`}>
                           {event.protocol}
                         </td>
-                        <td className="px-4 py-2 text-slate-300">
-                          {event.src_ip}
-                          {event.src_port ? `:${event.src_port}` : ""}
+                        <td className="px-4 py-2 text-slate-300 font-mono text-xs">
+                          <IpLabel ip={event.src_ip} />
+                          {event.src_port ? <span className="text-slate-500">:{event.src_port}</span> : ""}
                         </td>
-                        <td className="px-4 py-2 text-slate-300">
-                          {event.dst_ip}
-                          {event.dst_port ? `:${event.dst_port}` : ""}
+                        <td className="px-4 py-2 text-slate-300 font-mono text-xs">
+                          <IpLabel ip={event.dst_ip} />
+                          {event.dst_port ? <span className="text-slate-500">:{event.dst_port}</span> : ""}
                         </td>
                         <td className={`px-4 py-2 ${DIR_COLORS[event.direction] ?? "text-slate-400"}`}>
                           {event.direction}

@@ -7,6 +7,9 @@ export interface AlertsParams {
   severity?: string;
   status?: string;
   search?: string;
+  rule_id?: string;
+  from?: string;
+  to?: string;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
 }

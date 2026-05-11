@@ -21,6 +21,11 @@ export const createIncident = async (incident: {
   return data;
 };
 
+export const regenerateRemediation = async (id: string): Promise<Incident> => {
+  const { data } = await client.post(`/api/incidents/${id}/regenerate`);
+  return data;
+};
+
 export const updateIncident = async (
   id: string,
   updates: Partial<Pick<Incident, "status" | "title" | "description">>

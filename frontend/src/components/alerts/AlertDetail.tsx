@@ -1,10 +1,13 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { X, ExternalLink } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { X, FolderPlus, ExternalLink, CheckCircle } from "lucide-react";
 import { getAlert } from "../../api/alerts";
+import { createIncident } from "../../api/incidents";
 import { SeverityBadge } from "../shared/SeverityBadge";
 import { StatusBadge } from "../shared/StatusBadge";
 import { AIAnalysisPanel } from "./AIAnalysisPanel";
+import { IpLabel } from "../shared/IpLabel";
 import { LoadingSpinner } from "../shared/LoadingSpinner";
 
 interface AlertDetailProps {
@@ -13,12 +16,34 @@ interface AlertDetailProps {
 }
 
 export const AlertDetail: React.FC<AlertDetailProps> = ({ alertId, onClose }) => {
+  const navigate = useNavigate();
+  const [escalating, setEscalating] = useState(false);
+  const [escalatedId, setEscalatedId] = useState<string | null>(null);
+
   const { data: alert, isLoading } = useQuery({
     queryKey: ["alert", alertId],
     queryFn: () => getAlert(alertId),
     refetchInterval: (query) =>
       query.state.data?.ai_analysis === null ? 3000 : false,
   });
+
+  const handleEscalate = async () => {
+    if (!alert) return;
+    setEscalating(true);
+    try {
+      const incident = await createIncident({
+        title: alert.rule_name,
+        description: alert.ai_analysis?.threat_assessment ?? undefined,
+        severity: alert.severity,
+        alert_ids: [alertId],
+      });
+      setEscalatedId(incident.id);
+    } catch {
+      // keep button available on failure
+    } finally {
+      setEscalating(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-end">
@@ -67,19 +92,19 @@ export const AlertDetail: React.FC<AlertDetailProps> = ({ alertId, onClose }) =>
                 <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 font-mono text-xs space-y-1.5">
                   <div className="flex justify-between">
                     <span className="text-slate-500">Source</span>
-                    <span className="text-slate-200">
-                      {alert.triggering_event.src_ip}
+                    <span className="text-slate-200 text-right">
+                      <IpLabel ip={alert.triggering_event.src_ip} />
                       {alert.triggering_event.src_port
-                        ? `:${alert.triggering_event.src_port}`
+                        ? <span className="text-slate-400">:{alert.triggering_event.src_port}</span>
                         : ""}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Destination</span>
-                    <span className="text-slate-200">
-                      {alert.triggering_event.dst_ip}
+                    <span className="text-slate-200 text-right">
+                      <IpLabel ip={alert.triggering_event.dst_ip} />
                       {alert.triggering_event.dst_port
-                        ? `:${alert.triggering_event.dst_port}`
+                        ? <span className="text-slate-400">:{alert.triggering_event.dst_port}</span>
                         : ""}
                     </span>
                   </div>
@@ -119,12 +144,29 @@ export const AlertDetail: React.FC<AlertDetailProps> = ({ alertId, onClose }) =>
               </div>
             )}
 
-            {/* AI Analysis */}
-            <div>
-              <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                AI Analysis
-              </p>
-              <AIAnalysisPanel analysis={alert.ai_analysis} />
+            <AIAnalysisPanel analysis={alert.ai_analysis} />
+
+            {/* Escalation */}
+            <div className="border-t border-slate-800 pt-4">
+              {escalatedId ? (
+                <button
+                  onClick={() => { onClose(); navigate(`/incidents/${escalatedId}`); }}
+                  className="flex items-center gap-2 w-full px-3 py-2 rounded-md bg-green-900/20 border border-green-700/40 text-sm font-mono text-green-400 hover:bg-green-900/30 transition-colors"
+                >
+                  <CheckCircle size={14} />
+                  Incident created — click to view
+                  <ExternalLink size={12} className="ml-auto" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleEscalate}
+                  disabled={escalating}
+                  className="flex items-center gap-2 w-full px-3 py-2 rounded-md bg-slate-800 border border-slate-700 text-sm font-mono text-slate-300 hover:text-orange-400 hover:border-orange-900/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {escalating ? <LoadingSpinner size="sm" /> : <FolderPlus size={14} />}
+                  Escalate to Incident
+                </button>
+              )}
             </div>
           </div>
         )}

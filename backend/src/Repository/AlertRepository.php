@@ -18,9 +18,21 @@ class AlertRepository extends ServiceEntityRepository
 
     public function createFilteredQueryBuilder(array $filters): QueryBuilder
     {
-        $qb = $this->createQueryBuilder('a')
-            ->orderBy('a.timestamp', 'DESC');
+        $sortField = match ($filters['sort_by'] ?? '') {
+            'severity' => 'a.severity',
+            'status'   => 'a.status',
+            'rule'     => 'a.ruleName',
+            default    => 'a.timestamp',
+        };
+        $sortDir = strtoupper($filters['sort_dir'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
 
+        $qb = $this->createQueryBuilder('a')
+            ->orderBy($sortField, $sortDir);
+
+        if (!empty($filters['search'])) {
+            $qb->andWhere('a.ruleName LIKE :search')
+               ->setParameter('search', '%' . $filters['search'] . '%');
+        }
         if (!empty($filters['status'])) {
             $qb->andWhere('a.status = :status')->setParameter('status', $filters['status']);
         }

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 async def generate(prompt: str, model: str = "llama3.2:3b") -> str:
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=45.0) as client:
         response = await client.post(
             f"{OLLAMA_URL}/api/generate",
             json={

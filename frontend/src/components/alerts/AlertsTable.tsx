@@ -1,6 +1,7 @@
 import React from "react";
 import type { Alert } from "../../types";
 import { AlertRow } from "./AlertRow";
+import { Bot } from "lucide-react";
 
 interface AlertsTableProps {
   alerts: Alert[];
@@ -26,7 +27,10 @@ export const AlertsTable: React.FC<AlertsTableProps> = ({ alerts, onSelect }) =>
               Status
             </th>
             <th className="px-4 py-2.5 text-left text-xs font-mono font-semibold text-slate-500 uppercase tracking-wider">
-              AI
+              <span className="flex items-center gap-1">
+                <Bot size={11} />
+                AI Analysis
+              </span>
             </th>
             <th className="px-4 py-2.5 text-left text-xs font-mono font-semibold text-slate-500 uppercase tracking-wider">
               Time

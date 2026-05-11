@@ -42,14 +42,23 @@ Recent Alerts from Same Source IP (last 5):
 
 Respond ONLY with a valid JSON object containing exactly these fields:
 {{
-  "threat_summary": "<one-sentence summary of the threat>",
+  "threat_assessment": "<one-sentence assessment of the threat>",
+  "severity_justification": "<why this severity level is appropriate>",
   "mitre_tactic": "<MITRE ATT&CK tactic name>",
-  "mitre_technique": "<MITRE ATT&CK technique ID and name>",
+  "mitre_technique": "<MITRE ATT&CK technique ID and name, e.g. T1046 Network Service Discovery>",
   "confidence": <float 0.0-1.0>,
-  "is_false_positive": <true|false>,
+  "is_false_positive_likely": <true|false>,
   "recommended_action": "<immediate action to take>",
-  "risk_score": <integer 1-10>
+  "risk_score": <integer 1-10>,
+  "iocs": ["<suspicious IP, port, or pattern if relevant, or empty array>"]
 }}"""
+
+# Limit concurrent Ollama calls so the agent doesn't queue up
+_SEMAPHORE = asyncio.Semaphore(2)
+
+# Dedup: skip re-analysis of the same (rule_id, src_ip) within this window
+_DEDUP_WINDOW_SECONDS = 120
+_recently_analyzed: dict[str, float] = {}
 
 
 def _get_pg_connection():
@@ -93,7 +102,7 @@ def _fetch_recent_alerts_by_src_ip(src_ip: str, current_alert_id: str) -> list[d
 
 
 def _update_alert_analysis(alert_id: str, ai_analysis: dict) -> None:
-    is_fp = ai_analysis.get("is_false_positive", False)
+    is_fp = ai_analysis.get("is_false_positive_likely", False)
     new_status = "false_positive" if is_fp else "acknowledged"
     with _get_pg_connection() as conn:
         with conn.cursor() as cur:
@@ -161,6 +170,15 @@ async def _handle_message(payload: dict, redis_client) -> None:
     dst_port = triggering.get("dst_port", "?") if triggering else "?"
     protocol = triggering.get("protocol", "?") if triggering else "?"
 
+    # Skip if we analyzed this exact (rule, source) combination very recently
+    dedup_key = f"{alert.get('rule_id')}:{src_ip}"
+    now = asyncio.get_event_loop().time()
+    last = _recently_analyzed.get(dedup_key, 0)
+    if now - last < _DEDUP_WINDOW_SECONDS:
+        logger.info("Skipping duplicate analysis for %s (cooldown)", dedup_key)
+        return
+    _recently_analyzed[dedup_key] = now
+
     recent_alerts = _fetch_recent_alerts_by_src_ip(src_ip, alert_id)
 
     related_events_text = (
@@ -201,7 +219,7 @@ async def _handle_message(payload: dict, redis_client) -> None:
 
     _update_alert_analysis(alert_id, analysis)
 
-    is_fp = analysis.get("is_false_positive", False)
+    is_fp = analysis.get("is_false_positive_likely", False)
     alert["status"] = "false_positive" if is_fp else "acknowledged"
     alert["ai_analysis"] = analysis
     publish_payload = {
@@ -211,6 +229,14 @@ async def _handle_message(payload: dict, redis_client) -> None:
     }
     await redis_client.publish("alerts:updated", json.dumps(publish_payload))
     logger.info("Alert %s analysed and published.", alert_id)
+
+
+async def _handle_with_semaphore(payload: dict, redis_client) -> None:
+    async with _SEMAPHORE:
+        try:
+            await _handle_message(payload, redis_client)
+        except Exception as exc:
+            logger.exception("Unhandled error processing message: %s", exc)
 
 
 async def run() -> None:
@@ -226,7 +252,7 @@ async def run() -> None:
                     continue
                 try:
                     payload = json.loads(message["data"])
-                    await _handle_message(payload, redis_client)
+                    asyncio.create_task(_handle_with_semaphore(payload, redis_client))
                 except Exception as exc:
                     logger.exception("Unhandled error processing message: %s", exc)
 

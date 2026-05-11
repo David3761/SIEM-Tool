@@ -10,6 +10,8 @@ export interface EventsParams {
   dst_ip?: string;
   port?: number;
   search?: string;
+  from?: string;
+  to?: string;
 }
 
 export const getEvents = async (

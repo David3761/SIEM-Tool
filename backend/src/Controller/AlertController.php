@@ -33,12 +33,16 @@ class AlertController extends BaseApiController
         $qb = $this->alertRepository->createFilteredQueryBuilder($filters);
         $result = $this->paginate($qb, $request);
 
-        // Enrich with triggering event data
-        foreach ($result['items'] as &$item) {
-            if (!empty($item['triggering_event_id'])) {
-                $event = $this->eventRepository->find($item['triggering_event_id']);
-                $item['triggering_event'] = $event?->toArray();
+        // Batch-fetch all triggering events in one query
+        $eventIds = array_filter(array_column($result['items'], 'triggering_event_id'));
+        $eventsById = [];
+        if ($eventIds) {
+            foreach ($this->eventRepository->findBy(['id' => array_values($eventIds)]) as $e) {
+                $eventsById[$e->getId()] = $e->toArray();
             }
+        }
+        foreach ($result['items'] as &$item) {
+            $item['triggering_event'] = $eventsById[$item['triggering_event_id'] ?? ''] ?? null;
         }
 
         return $this->json($result);

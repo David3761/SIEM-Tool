@@ -38,20 +38,19 @@ Event Timeline (chronological):
 
 Respond ONLY with a valid JSON object containing exactly these fields:
 {{
-  "executive_summary": "<2-3 sentence summary of the incident>",
-  "root_cause": "<identified or suspected root cause>",
-  "mitre_tactic": "<primary MITRE ATT&CK tactic>",
-  "mitre_technique": "<primary MITRE ATT&CK technique ID and name>",
+  "summary": "<2-3 sentence executive summary of the incident>",
+  "attack_pattern": "<identified attack pattern, e.g. Reconnaissance → Initial Access → Lateral Movement>",
+  "mitre_tactics": ["<MITRE ATT&CK tactic 1>", "<tactic 2>"],
+  "mitre_techniques": ["<T1046 Network Service Discovery>", "<T1110.001 Brute Force>"],
   "confidence": <float 0.0-1.0>,
   "remediation_steps": [
-    "<step 1>",
-    "<step 2>",
-    "<step 3>"
+    "IMMEDIATE: <urgent containment action>",
+    "SHORT-TERM: <action within hours>",
+    "LONG-TERM: <hardening measure>"
   ],
-  "containment_actions": ["<action 1>", "<action 2>"],
-  "affected_assets": ["<asset 1>"],
+  "iocs": ["<suspicious IP, domain, hash, or pattern>"],
   "timeline": [
-    {{"time": "<HH:MM:SSZ>", "event": "<description>"}},
+    {{"timestamp": "<ISO timestamp>", "event": "<description>", "significance": "<low|medium|high>"}},
     ...
   ],
   "estimated_impact": "<low|medium|high|critical>",
@@ -133,7 +132,7 @@ def _format_timeline_line(ev: dict) -> str:
 
 
 async def run() -> None:
-    logger.info("Agent 2 started – polling every 10 s")
+    logger.info("Agent 2 started – polling every 5 s")
     while True:
         try:
             incident = _fetch_pending_incident()
@@ -141,7 +140,7 @@ async def run() -> None:
                 await _process_incident(incident)
         except Exception as exc:
             logger.exception("Agent 2 unhandled error: %s", exc)
-        await asyncio.sleep(10)
+        await asyncio.sleep(5)
 
 
 async def _process_incident(incident: dict) -> None:

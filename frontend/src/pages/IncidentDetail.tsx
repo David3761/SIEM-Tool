@@ -1,8 +1,9 @@
 import React from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
-import { getIncident, updateIncident } from "../api/incidents";
+import { ChevronLeft, RefreshCw } from "lucide-react";
+import { getIncident, updateIncident, regenerateRemediation } from "../api/incidents";
+import type { AIRemediation } from "../types";
 import { SeverityBadge } from "../components/shared/SeverityBadge";
 import { IncidentTimeline } from "../components/incidents/IncidentTimeline";
 import { RemediationPanel } from "../components/incidents/RemediationPanel";
@@ -10,6 +11,28 @@ import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import toast from "react-hot-toast";
 
 const STATUS_OPTIONS = ["open", "in_progress", "resolved"] as const;
+
+// Maps old agent output field names to the current AIRemediation interface.
+// Handles data saved before the prompt was fixed.
+function normalizeRemediation(raw: Record<string, unknown>): AIRemediation {
+  const toArray = (v: unknown, fallback: unknown): string[] => {
+    if (Array.isArray(v)) return v as string[];
+    if (typeof v === "string" && v) return [v];
+    if (Array.isArray(fallback)) return fallback as string[];
+    return [];
+  };
+
+  return {
+    summary: (raw.summary || raw.executive_summary || "") as string,
+    attack_pattern: (raw.attack_pattern || raw.root_cause || "") as string,
+    mitre_tactics: toArray(raw.mitre_tactics, raw.mitre_tactic ? [raw.mitre_tactic] : []),
+    mitre_techniques: toArray(raw.mitre_techniques, raw.mitre_technique ? [raw.mitre_technique] : []),
+    remediation_steps: toArray(raw.remediation_steps, []),
+    iocs: toArray(raw.iocs, raw.affected_assets ?? []),
+    timeline: Array.isArray(raw.timeline) ? raw.timeline as AIRemediation["timeline"] : [],
+    analyzed_at: (raw.analyzed_at || "") as string,
+  };
+}
 
 export const IncidentDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -20,16 +43,26 @@ export const IncidentDetail: React.FC = () => {
     queryFn: () => getIncident(id!),
     enabled: !!id,
     refetchInterval: (query) =>
-      query.state.data?.ai_remediation === null ? 5000 : false,
+      !query.state.data?.ai_remediation ? 3000 : false,
   });
 
   const statusMutation = useMutation({
-    mutationFn: (status: string) => updateIncident(id!, { status: status as "open" | "in_progress" | "resolved" }),
+    mutationFn: (status: string) =>
+      updateIncident(id!, { status: status as "open" | "in_progress" | "resolved" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["incident", id] });
       toast.success("Status updated");
     },
     onError: () => toast.error("Failed to update status"),
+  });
+
+  const regenerateMutation = useMutation({
+    mutationFn: () => regenerateRemediation(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["incident", id] });
+      toast.success("Regenerating plan — Agent 2 will pick this up shortly");
+    },
+    onError: () => toast.error("Failed to reset remediation"),
   });
 
   if (isLoading || !incident) {
@@ -39,6 +72,10 @@ export const IncidentDetail: React.FC = () => {
       </div>
     );
   }
+
+  const remediation = incident.ai_remediation
+    ? normalizeRemediation(incident.ai_remediation as unknown as Record<string, unknown>)
+    : null;
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-6">
@@ -91,10 +128,23 @@ export const IncidentDetail: React.FC = () => {
 
         {/* Remediation */}
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-5">
-          <h3 className="text-sm font-mono font-semibold text-slate-100 mb-5">
-            AI Remediation Plan
-          </h3>
-          <RemediationPanel remediation={incident.ai_remediation} />
+          <RemediationPanel remediation={remediation} />
+
+          {/* Regenerate button — shown when plan exists but looks empty, or on demand */}
+          {incident.ai_remediation && (
+            <div className="mt-4 pt-4 border-t border-slate-700/50">
+              <button
+                onClick={() => regenerateMutation.mutate()}
+                disabled={regenerateMutation.isPending}
+                className="flex items-center gap-2 text-xs font-mono text-slate-600 hover:text-slate-400 disabled:opacity-50 transition-colors"
+              >
+                {regenerateMutation.isPending
+                  ? <LoadingSpinner size="sm" />
+                  : <RefreshCw size={11} />}
+                Regenerate plan
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

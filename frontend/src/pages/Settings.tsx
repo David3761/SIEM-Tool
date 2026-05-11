@@ -6,6 +6,7 @@ import { getRules, createRule, updateRule, deleteRule } from "../api/rules";
 import type { Rule } from "../types";
 import { SeverityBadge } from "../components/shared/SeverityBadge";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
+import { useDnsSetting } from "../hooks/useDnsSetting";
 import toast from "react-hot-toast";
 
 function TagInput({
@@ -78,6 +79,7 @@ const RULE_DEFAULTS = {
 
 export const Settings: React.FC = () => {
   const queryClient = useQueryClient();
+  const [dnsEnabled, setDnsEnabled] = useDnsSetting();
 
   const { data: config, isLoading: configLoading } = useQuery({
     queryKey: ["config"],
@@ -151,6 +153,25 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-6">
+      {/* Display Settings */}
+      <div className="bg-slate-800 rounded-lg border border-slate-700 p-5">
+        <h3 className="text-sm font-mono font-semibold text-slate-100 mb-5">Display Settings</h3>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-mono text-slate-200">Reverse DNS Lookup</p>
+            <p className="text-xs font-mono text-slate-500 mt-0.5">
+              Resolve IP addresses to hostnames in alerts and events
+            </p>
+          </div>
+          <button
+            onClick={() => setDnsEnabled(!dnsEnabled)}
+            className={`transition-colors ${dnsEnabled ? "text-cyan-400" : "text-slate-600"}`}
+          >
+            {dnsEnabled ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+          </button>
+        </div>
+      </div>
+
       {/* Monitoring Config */}
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-5">
         <h3 className="text-sm font-mono font-semibold text-slate-100 mb-5">

@@ -5,19 +5,12 @@ import { getAlerts, exportAlerts } from "../api/alerts";
 import type { Alert } from "../types";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { AlertsTable } from "../components/alerts/AlertsTable";
-import { AlertFilters, type AlertFilterState } from "../components/alerts/AlertFilters";
+import { AlertFilters, DEFAULT_ALERT_FILTERS, type AlertFilterState } from "../components/alerts/AlertFilters";
 import { AlertDetail } from "../components/alerts/AlertDetail";
 import { Pagination } from "../components/shared/Pagination";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import toast from "react-hot-toast";
 
-const DEFAULT_FILTERS: AlertFilterState = {
-  search: "",
-  severity: "",
-  status: "",
-  sort_by: "timestamp",
-  sort_dir: "desc",
-};
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -29,7 +22,7 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export const Alerts: React.FC = () => {
-  const [filters, setFilters] = useState<AlertFilterState>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<AlertFilterState>(DEFAULT_ALERT_FILTERS);
   const [page, setPage] = useState(1);
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
   const [exportingCsv, setExportingCsv] = useState(false);
@@ -44,6 +37,9 @@ export const Alerts: React.FC = () => {
     ...(debouncedFilters.search && { search: debouncedFilters.search }),
     ...(debouncedFilters.severity && { severity: debouncedFilters.severity }),
     ...(debouncedFilters.status && { status: debouncedFilters.status }),
+    ...(debouncedFilters.rule_id && { rule_id: debouncedFilters.rule_id }),
+    ...(debouncedFilters.from && { from: debouncedFilters.from }),
+    ...(debouncedFilters.to && { to: debouncedFilters.to }),
     sort_by: debouncedFilters.sort_by,
     sort_dir: debouncedFilters.sort_dir,
   };

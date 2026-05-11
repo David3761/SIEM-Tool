@@ -51,6 +51,15 @@ class IncidentController extends BaseApiController
         $this->em->persist($incident);
         $this->em->flush();
 
+        // Back-link alerts to this incident
+        foreach ($alertIds as $alertId) {
+            $alert = $this->alertRepository->find($alertId);
+            if ($alert) {
+                $alert->setIncidentId($incident->getId());
+            }
+        }
+        $this->em->flush();
+
         return $this->json($incident->toArray(), 201);
     }
 
@@ -70,6 +79,21 @@ class IncidentController extends BaseApiController
         if (!$incident) {
             return $this->jsonError('Incident not found', 404);
         }
+        return $this->json($incident->toArray());
+    }
+
+    #[Route('/{id}/regenerate', methods: ['POST'])]
+    public function regenerate(string $id): JsonResponse
+    {
+        $incident = $this->incidentRepository->find($id);
+        if (!$incident) {
+            return $this->jsonError('Incident not found', 404);
+        }
+
+        $incident->setAiRemediation(null);
+        $incident->setTimeline(null);
+        $this->em->flush();
+
         return $this->json($incident->toArray());
     }
 

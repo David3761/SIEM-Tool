@@ -6,6 +6,7 @@ import { LoadingSpinner } from "../shared/LoadingSpinner";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateAlertStatus } from "../../api/alerts";
+import { IpLabel } from "../shared/IpLabel";
 import toast from "react-hot-toast";
 
 interface AlertRowProps {
@@ -37,11 +38,15 @@ export const AlertRow: React.FC<AlertRowProps> = ({ alert, onSelect }) => {
         <span className="text-sm font-mono text-slate-200">{alert.rule_name}</span>
       </td>
       <td className="px-4 py-3">
-        <span className="text-xs font-mono text-slate-400">
-          {alert.triggering_event
-            ? `${alert.triggering_event.src_ip} → ${alert.triggering_event.dst_ip}`
-            : "—"}
-        </span>
+        {alert.triggering_event ? (
+          <div className="flex items-start gap-1.5 text-xs font-mono text-slate-400">
+            <IpLabel ip={alert.triggering_event.src_ip} />
+            <span className="mt-0.5">→</span>
+            <IpLabel ip={alert.triggering_event.dst_ip} />
+          </div>
+        ) : (
+          <span className="text-xs font-mono text-slate-600">—</span>
+        )}
       </td>
       <td className="px-4 py-3">
         <StatusBadge status={alert.status} />
@@ -50,16 +55,19 @@ export const AlertRow: React.FC<AlertRowProps> = ({ alert, onSelect }) => {
         {alert.ai_analysis === null ? (
           <div className="flex items-center gap-1.5 text-slate-500">
             <LoadingSpinner size="sm" />
-            <span className="text-xs font-mono">Analyzing…</span>
+            <span className="text-xs font-mono">AI analyzing…</span>
           </div>
         ) : alert.ai_analysis.error ? (
-          <span className="text-xs font-mono text-yellow-500">Error</span>
+          <span className="text-xs font-mono text-yellow-500">AI error</span>
         ) : (
-          <div className="flex items-center gap-1.5">
-            <CheckCircle2 size={13} className="text-green-400" />
-            <span className="text-xs font-mono text-slate-400">
-              {alert.ai_analysis.confidence}% conf.
-            </span>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-1.5">
+              <CheckCircle2 size={13} className="text-green-400" />
+              <span className="text-xs font-mono text-slate-400">
+                {Math.round((alert.ai_analysis.confidence ?? 0) * 100)}% confidence
+              </span>
+            </div>
+            <span className="text-xs font-mono text-slate-600">AI-generated · verify before acting</span>
           </div>
         )}
       </td>

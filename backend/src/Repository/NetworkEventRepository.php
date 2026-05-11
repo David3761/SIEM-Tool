@@ -22,10 +22,10 @@ class NetworkEventRepository extends ServiceEntityRepository
             ->orderBy('e.timestamp', 'DESC');
 
         if (!empty($filters['src_ip'])) {
-            $qb->andWhere('e.srcIp = :srcIp')->setParameter('srcIp', $filters['src_ip']);
+            $qb->andWhere('e.srcIp LIKE :srcIp')->setParameter('srcIp', $filters['src_ip'] . '%');
         }
         if (!empty($filters['dst_ip'])) {
-            $qb->andWhere('e.dstIp = :dstIp')->setParameter('dstIp', $filters['dst_ip']);
+            $qb->andWhere('e.dstIp LIKE :dstIp')->setParameter('dstIp', $filters['dst_ip'] . '%');
         }
         if (!empty($filters['protocol'])) {
             $qb->andWhere('e.protocol = :protocol')->setParameter('protocol', $filters['protocol']);
