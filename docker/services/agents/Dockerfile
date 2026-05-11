@@ -1,4 +1,10 @@
-FROM ubuntu:latest
-LABEL authors="robert"
+FROM python:3.11-slim
 
-ENTRYPOINT ["top", "-b"]
+WORKDIR /app
+
+COPY ./services/agents/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["python", "services/agents/main.py"]
