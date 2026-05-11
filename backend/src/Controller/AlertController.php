@@ -145,6 +145,8 @@ class AlertController extends BaseApiController
             $rows .= "<tr><td>{$id}</td><td>{$ruleName}</td><td>{$severity}</td><td>{$ts}</td><td>{$status}</td></tr>";
         }
 
+        $exportedAt = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+
         $html = <<<HTML
 <!DOCTYPE html>
 <html>
@@ -159,7 +161,7 @@ class AlertController extends BaseApiController
 </style>
 </head>
 <body>
-<h1>Alerts Export — {$ts}</h1>
+<h1>Alerts Export — {$exportedAt}</h1>
 <table>
   <thead><tr><th>ID</th><th>Rule Name</th><th>Severity</th><th>Timestamp</th><th>Status</th></tr></thead>
   <tbody>{$rows}</tbody>
