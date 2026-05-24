@@ -46,8 +46,9 @@ export const TopIPsChart: React.FC<TopIPsChartProps> = ({ data }) => {
               borderRadius: 6,
               fontSize: 12,
               fontFamily: "monospace",
-              color: "#e2e8f0",
             }}
+            labelStyle={{ color: "#e2e8f0" }}
+            itemStyle={{ color: "#e2e8f0" }}
             cursor={{ fill: "rgba(148,163,184,0.05)" }}
             formatter={(value) => [value, "Events"]}
           />

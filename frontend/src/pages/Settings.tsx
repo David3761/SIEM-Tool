@@ -204,9 +204,12 @@ export const Settings: React.FC = () => {
               />
             </div>
             <div>
-              <label className="text-xs font-mono text-slate-400 uppercase tracking-wider block mb-2">
-                Excluded IPs
+              <label className="text-xs font-mono text-slate-400 uppercase tracking-wider block mb-1">
+                IP Whitelist
               </label>
+              <p className="text-xs font-mono text-slate-500 mb-2">
+                Traffic to or from these IPs is ignored entirely — no events captured, no alerts fired. Use for trusted infrastructure (monitoring servers, admin workstations, scanners).
+              </p>
               <TagInput
                 values={excludedIps}
                 onChange={setExcludedIps}

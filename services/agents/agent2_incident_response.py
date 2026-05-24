@@ -27,35 +27,29 @@ PROMPT_TEMPLATE = """You are a cybersecurity incident response expert. Analyse t
 Incident Details:
 - Title: {title}
 - Severity: {severity}
-- Status: {status}
-- Created At: {created_at}
 
-Alerts Summary:
+Alerts:
 {alerts_summary}
 
-Event Timeline (chronological):
+Event sample (chronological, most recent {event_count} events):
 {timeline_text}
 
 Respond ONLY with a valid JSON object containing exactly these fields:
 {{
   "summary": "<2-3 sentence executive summary of the incident>",
-  "attack_pattern": "<identified attack pattern, e.g. Reconnaissance → Initial Access → Lateral Movement>",
-  "mitre_tactics": ["<MITRE ATT&CK tactic 1>", "<tactic 2>"],
-  "mitre_techniques": ["<T1046 Network Service Discovery>", "<T1110.001 Brute Force>"],
-  "confidence": <float 0.0-1.0>,
+  "attack_pattern": "<short attack pattern, e.g. Reconnaissance → Initial Access → Lateral Movement>",
+  "mitre_tactics": ["<MITRE ATT&CK tactic>"],
+  "mitre_techniques": ["<T1046 Network Service Discovery>"],
   "remediation_steps": [
     "IMMEDIATE: <urgent containment action>",
     "SHORT-TERM: <action within hours>",
     "LONG-TERM: <hardening measure>"
   ],
-  "iocs": ["<suspicious IP, domain, hash, or pattern>"],
-  "timeline": [
-    {{"timestamp": "<ISO timestamp>", "event": "<description>", "significance": "<low|medium|high>"}},
-    ...
-  ],
-  "estimated_impact": "<low|medium|high|critical>",
-  "requires_escalation": <true|false>
+  "iocs": ["<suspicious IP, domain, or pattern>"]
 }}"""
+
+# Cap events fed to the LLM — beyond this the prompt grows too large for fast inference
+MAX_EVENTS_IN_PROMPT = 20
 
 
 def _get_pg_connection():
@@ -170,7 +164,7 @@ async def _process_incident(incident: dict) -> None:
 
     events = _fetch_events_by_ids(all_event_ids)
 
-    # Sort chronologically
+    # Sort chronologically (oldest → newest)
     def _event_sort_key(ev: dict):
         ts = ev.get("timestamp")
         if ts is None:
@@ -181,23 +175,21 @@ async def _process_incident(incident: dict) -> None:
 
     events.sort(key=_event_sort_key)
 
+    # Cap the sample fed to the LLM — keep most recent N
+    sample_events = events[-MAX_EVENTS_IN_PROMPT:]
+
     timeline_text = (
-        "\n".join(_format_timeline_line(e) for e in events) or "No events available."
+        "\n".join(_format_timeline_line(e) for e in sample_events) or "No events available."
     )
 
-    alerts_summary = ", ".join(
-        f"{al.get('rule_name', '?')} ({al.get('severity', '?')})" for al in alerts
+    alerts_summary = "\n".join(
+        f"- {al.get('rule_name', '?')} ({al.get('severity', '?')})" for al in alerts
     ) or "No alerts."
-
-    created_at = incident.get("created_at", "")
-    if hasattr(created_at, "isoformat"):
-        created_at = created_at.isoformat()
 
     prompt = PROMPT_TEMPLATE.format(
         title=incident.get("title", ""),
         severity=incident.get("severity", ""),
-        status=incident.get("status", ""),
-        created_at=created_at,
+        event_count=len(sample_events),
         alerts_summary=alerts_summary,
         timeline_text=timeline_text,
     )
@@ -213,8 +205,15 @@ async def _process_incident(incident: dict) -> None:
 
     result["analyzed_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Extract timeline array from LLM result for the incidents.timeline column
-    llm_timeline = result.get("timeline", [])
+    # Build timeline locally from sorted events — no need to ask the LLM
+    local_timeline = [
+        {
+            "timestamp": (ev["timestamp"].isoformat() if hasattr(ev.get("timestamp"), "isoformat") else str(ev.get("timestamp", ""))),
+            "event": _format_timeline_line(ev),
+            "significance": "medium",
+        }
+        for ev in events
+    ]
 
-    _update_incident(incident_id, result, llm_timeline)
+    _update_incident(incident_id, result, local_timeline)
     logger.info("Incident %s remediation stored.", incident_id)

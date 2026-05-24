@@ -14,10 +14,10 @@ interface ProtocolPieChartProps {
 }
 
 const COLORS: Record<string, string> = {
-  TCP: "#22d3ee",
-  UDP: "#a78bfa",
-  ICMP: "#fbbf24",
-  OTHER: "#475569",
+  TCP:   "#22d3ee", // cyan-400
+  UDP:   "#c084fc", // purple-400
+  ICMP:  "#facc15", // yellow-400
+  OTHER: "#94a3b8", // slate-400
 };
 
 export const ProtocolPieChart: React.FC<ProtocolPieChartProps> = ({ data }) => {
@@ -34,14 +34,15 @@ export const ProtocolPieChart: React.FC<ProtocolPieChartProps> = ({ data }) => {
             cy="50%"
             innerRadius={55}
             outerRadius={80}
-            paddingAngle={3}
+            paddingAngle={2}
             dataKey="value"
           >
             {chartData.map((entry, index) => (
               <Cell
                 key={index}
-                fill={COLORS[entry.name] ?? "#475569"}
-                stroke="transparent"
+                fill={COLORS[entry.name] ?? "#94a3b8"}
+                stroke="#1e293b"
+                strokeWidth={2}
               />
             ))}
           </Pie>
@@ -52,8 +53,9 @@ export const ProtocolPieChart: React.FC<ProtocolPieChartProps> = ({ data }) => {
               borderRadius: 6,
               fontSize: 12,
               fontFamily: "monospace",
-              color: "#e2e8f0",
             }}
+            labelStyle={{ color: "#e2e8f0" }}
+            itemStyle={{ color: "#e2e8f0" }}
           />
           <Legend
             iconType="circle"
