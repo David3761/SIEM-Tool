@@ -13,3 +13,8 @@
 | US-09 | network admin | export alerts to a CSV/PDF report | I can share incident reports with management | Low |
 | US-10 | network admin | set custom threshold rules (e.g. >500 req/min = alert) | I can define what counts as abnormal | Low |
 | US-11 | security analyst | see a timeline view of an incident | I can reconstruct the sequence of events | Low |
+| US-12 | security analyst | escalate an alert to a full incident with one click | I can group related alerts for investigation | Medium |
+| US-13 | security analyst | get an AI-generated remediation plan with MITRE ATT&CK mapping | I know what containment and hardening steps to take | High |
+| US-14 | network admin | whitelist trusted IPs so they don't generate alerts | I avoid alert fatigue from known-good infrastructure | Medium |
+| US-15 | network admin | resolve IP addresses to hostnames via reverse DNS in the UI | I can quickly identify which machine an IP belongs to | Low |
+| US-16 | security analyst | regenerate an AI remediation plan if the first attempt was poor | I get a better plan without recreating the incident | Low |

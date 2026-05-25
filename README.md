@@ -82,3 +82,33 @@ siem-tool/
 - [Teammate 3 — Python — Rule Engine and Alert Management](docs/teammate_instructions/teammate3_rules_alerts.md)
 - [Teammate 4 — Python — AI Agents (Ollama)](docs/teammate_instructions/teammate4_ai_agents.md)
 - [Teammate 5 — React / TypeScript — Frontend](docs/teammate_instructions/teammate5_frontend.md)
+
+---
+
+## MDS — Grading Criteria Coverage
+
+This section maps each grading criterion from the lab requirements to where it lives in the repository.
+
+### A. Implementation (10 pts)
+
+| Criterion | Location |
+|---|---|
+| Working application (live demo) | Run `make build` — full stack via Docker Compose |
+| ≥ 2 AI agents (functional, local LLM) | [Agent 1 — Threat Analyst](services/agents/agent1_threat_analyst.py) + [Agent 2 — Incident Response](services/agents/agent2_incident_response.py), both using local Ollama (`llama3.2:3b`) |
+| Offline demo recording | *(YouTube link to be added before final presentation)* |
+| Original topic | SIEM tool — not covered by the "Dezvoltarea aplicațiilor web" semester 1 course |
+
+### B. Software Development Process with AI (10 pts)
+
+| Criterion | Pts | Location |
+|---|---|---|
+| User stories (≥ 10) + backlog | 2 | [docs/SIEM_backlog.md](docs/SIEM_backlog.md) — 16 user stories |
+| Diagrams (UML / architecture / workflows) | 1 | [Architecture](docs/diagrams/architecture.md) · [ER](docs/diagrams/er-diagram.md) · [Sequence: Alert Flow](docs/diagrams/sequence-alert-flow.md) · [Sequence: Incident](docs/diagrams/sequence-incident.md) · [Alert/Incident Lifecycle](docs/diagrams/alert-lifecycle.md) |
+| Git: branches, merges, PRs, ≥ 5 commits/student | 1 | GitHub: 12+ merged PRs, multiple feature branches (`backend`, `frontend`, `feature/sniffer`, `feature/rules-engine`, `integrare-agenti`, `fix-issue-18`, `issue/fix-race-condition`, etc.) |
+| Automated tests + agent evals | 2 | Frontend: [frontend/src/tests/](frontend/src/tests/) (Vitest) · Services: [services/rules/tests/](services/rules/tests/), [services/capture/tests/](services/capture/tests/), [services/agents/tests/](services/agents/tests/) including [test_agent_evals.py](services/agents/tests/test_agent_evals.py) |
+| Bug report → PR resolution | 1 | GitHub Issues + closing PRs (commits referencing `Fixes #18`, `Closes #11`, etc.); [bug report template](.github/ISSUE_TEMPLATE/) |
+| CI/CD pipeline | 1 | [.github/workflows/ci.yml](.github/workflows/ci.yml) — runs frontend typecheck + tests, PHP lint, Python pytest, Docker build validation on every PR |
+| AI tools usage report | 2 | [docs/AI_TOOLS_USAGE.md](docs/AI_TOOLS_USAGE.md) |
+
+### Additional documentation
+- [Executive Summary](docs/EXECUTIVE_SUMMARY.md) — project overview and outcomes

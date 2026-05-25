@@ -13,8 +13,8 @@ import toast from "react-hot-toast";
 const STATUS_OPTIONS = ["open", "in_progress", "resolved"] as const;
 
 // Maps old agent output field names to the current AIRemediation interface.
-// Handles data saved before the prompt was fixed.
-function normalizeRemediation(raw: Record<string, unknown>): AIRemediation {
+// Preserves the `error` field so RemediationPanel can show the error UI.
+function normalizeRemediation(raw: Record<string, unknown>): AIRemediation & { error?: string } {
   const toArray = (v: unknown, fallback: unknown): string[] => {
     if (Array.isArray(v)) return v as string[];
     if (typeof v === "string" && v) return [v];
@@ -22,7 +22,7 @@ function normalizeRemediation(raw: Record<string, unknown>): AIRemediation {
     return [];
   };
 
-  return {
+  const normalized: AIRemediation & { error?: string } = {
     summary: (raw.summary || raw.executive_summary || "") as string,
     attack_pattern: (raw.attack_pattern || raw.root_cause || "") as string,
     mitre_tactics: toArray(raw.mitre_tactics, raw.mitre_tactic ? [raw.mitre_tactic] : []),
@@ -32,6 +32,11 @@ function normalizeRemediation(raw: Record<string, unknown>): AIRemediation {
     timeline: Array.isArray(raw.timeline) ? raw.timeline as AIRemediation["timeline"] : [],
     analyzed_at: (raw.analyzed_at || "") as string,
   };
+
+  if (typeof raw.error === "string" && raw.error) {
+    normalized.error = raw.error;
+  }
+  return normalized;
 }
 
 export const IncidentDetail: React.FC = () => {
