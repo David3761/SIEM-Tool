@@ -26,8 +26,7 @@ describe("AlertsTable", () => {
     const onSelect = vi.fn();
     renderWithQuery(<AlertsTable alerts={alerts} onSelect={onSelect} />);
 
-    expect(screen.getByText("Port Scan Detected")).toBeInTheDocument();
-    // Both rows should be visible (same rule_name in mock data)
+    // Both rows should be visible (same rule_name in both mocks)
     const rows = screen.getAllByText("Port Scan Detected");
     expect(rows).toHaveLength(2);
   });
@@ -60,7 +59,7 @@ describe("AlertsTable", () => {
 
   it("shows AI confidence for alert with completed analysis", () => {
     renderWithQuery(<AlertsTable alerts={[mockAlert]} onSelect={vi.fn()} />);
-    expect(screen.getByText(/87%/i)).toBeInTheDocument();
+    expect(screen.getByText(/87%\s*confidence/i)).toBeInTheDocument();
   });
 
   it("shows False Positive button for non-false-positive alerts", () => {

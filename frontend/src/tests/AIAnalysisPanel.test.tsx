@@ -1,3 +1,4 @@
+import "@testing-library/jest-dom/vitest";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { AIAnalysisPanel } from "../components/alerts/AIAnalysisPanel";
@@ -8,7 +9,8 @@ const mockAnalysis: AIAnalysis = {
   severity_justification: "Rapid multi-port targeting observed.",
   mitre_tactic: "Discovery",
   mitre_technique: "T1046 - Network Service Discovery",
-  confidence: 87,
+  confidence: 0.87,
+  risk_score: 8,
   is_false_positive_likely: false,
   recommended_action: "Block source IP immediately.",
   iocs: ["192.168.1.100", "port-scan"],
@@ -16,19 +18,19 @@ const mockAnalysis: AIAnalysis = {
 };
 
 describe("AIAnalysisPanel", () => {
-  it("shows loading spinner and 'AI analysis in progress' message when analysis is null", () => {
+  it("shows loading spinner when analysis is null", () => {
     render(<AIAnalysisPanel analysis={null} />);
-    expect(screen.getByText(/AI analysis in progress/i)).toBeInTheDocument();
+    expect(screen.getByText(/Analyzing threat/i)).toBeInTheDocument();
   });
 
   it("shows warning banner with error message when analysis has an error field", () => {
     const errorAnalysis: AIAnalysis = {
       ...mockAnalysis,
-      error: "OpenAI timeout after 30s",
+      error: "Ollama timeout after 30s",
     };
     render(<AIAnalysisPanel analysis={errorAnalysis} />);
     expect(screen.getByText(/Analysis Error/i)).toBeInTheDocument();
-    expect(screen.getByText("OpenAI timeout after 30s")).toBeInTheDocument();
+    expect(screen.getByText("Ollama timeout after 30s")).toBeInTheDocument();
   });
 
   it("renders threat assessment when analysis is complete", () => {

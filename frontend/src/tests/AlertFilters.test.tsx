@@ -1,20 +1,34 @@
+import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AlertFilters, type AlertFilterState } from "../components/alerts/AlertFilters";
 
 const defaultFilters: AlertFilterState = {
   search: "",
   severity: "",
   status: "",
+  rule_id: "",
+  from: "",
+  to: "",
   sort_by: "timestamp",
   sort_dir: "desc",
 };
 
+function renderWithQuery(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  );
+}
+
 describe("AlertFilters", () => {
   it("renders all filter controls", () => {
-    render(<AlertFilters filters={defaultFilters} onChange={vi.fn()} />);
-    expect(screen.getByPlaceholderText(/Search alerts/i)).toBeInTheDocument();
+    renderWithQuery(<AlertFilters filters={defaultFilters} onChange={vi.fn()} />);
+    expect(screen.getByPlaceholderText(/Search/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue("All Severities")).toBeInTheDocument();
     expect(screen.getByDisplayValue("All Statuses")).toBeInTheDocument();
   });
@@ -22,9 +36,9 @@ describe("AlertFilters", () => {
   it("calls onChange with updated search when text is typed", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<AlertFilters filters={defaultFilters} onChange={onChange} />);
+    renderWithQuery(<AlertFilters filters={defaultFilters} onChange={onChange} />);
 
-    const input = screen.getByPlaceholderText(/Search alerts/i);
+    const input = screen.getByPlaceholderText(/Search/i);
     await user.type(input, "port");
 
     expect(onChange).toHaveBeenCalledWith(
@@ -35,7 +49,7 @@ describe("AlertFilters", () => {
   it("calls onChange when severity filter changes", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<AlertFilters filters={defaultFilters} onChange={onChange} />);
+    renderWithQuery(<AlertFilters filters={defaultFilters} onChange={onChange} />);
 
     await user.selectOptions(screen.getByDisplayValue("All Severities"), "critical");
 
@@ -47,7 +61,7 @@ describe("AlertFilters", () => {
   it("calls onChange when status filter changes", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<AlertFilters filters={defaultFilters} onChange={onChange} />);
+    renderWithQuery(<AlertFilters filters={defaultFilters} onChange={onChange} />);
 
     await user.selectOptions(screen.getByDisplayValue("All Statuses"), "open");
 
@@ -59,9 +73,8 @@ describe("AlertFilters", () => {
   it("toggles sort direction when direction button is clicked", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<AlertFilters filters={defaultFilters} onChange={onChange} />);
+    renderWithQuery(<AlertFilters filters={defaultFilters} onChange={onChange} />);
 
-    // Default sort_dir is "desc", so button shows "↓"
     const sortBtn = screen.getByText("↓");
     await user.click(sortBtn);
 
@@ -71,7 +84,7 @@ describe("AlertFilters", () => {
   });
 
   it("reflects current filter values in the UI", () => {
-    render(
+    renderWithQuery(
       <AlertFilters
         filters={{ ...defaultFilters, search: "existing search" }}
         onChange={vi.fn()}
