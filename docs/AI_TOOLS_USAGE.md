@@ -10,7 +10,7 @@ Acest document descrie cum am folosit instrumentele de AI în fiecare etapă a d
 |---|---|---|
 | Claude Code (Anthropic) | Claude Opus 4.7 / Sonnet 4.6 | Generare cod, debugging, refactorizare, code review |
 | GitHub Copilot | GPT-4 / Codex | Autocomplete în VS Code pentru cod boilerplate |
-| ChatGPT | GPT-4o | Brainstorming arhitectură, explicații, depanare |
+| Gemini | Gemini 2.5 Pro | Brainstorming arhitectură, explicații, depanare |
 | Ollama (local) | llama3.2:3b | **Parte din produs** — Agenții 1 și 2 (analiza alertelor, plan de remediere) |
 
 > *Notă:* Ollama nu este o unealtă de dezvoltare — este integrat în produsul final ca motor LLM local pentru cei 2 agenți AI cerinți.
@@ -20,7 +20,7 @@ Acest document descrie cum am folosit instrumentele de AI în fiecare etapă a d
 ## 2. Folosirea AI per etapă
 
 ### 2.1 Planificare & User Stories
-- **ChatGPT / Claude** au fost folosite pentru a brainstormul user stories realiste pentru un SIEM, în special pentru personaje (network admin, security analyst) și criterii de acceptare.
+- **Gemini / Claude** au fost folosite pentru a brainstormul user stories realiste pentru un SIEM, în special pentru personaje (network admin, security analyst) și criterii de acceptare.
 - Backlogul rezultat a fost rafinat manual pentru a se potrivi domeniului.
 
 ### 2.2 Arhitectură & Diagrame
@@ -82,7 +82,7 @@ Acest document descrie cum am folosit instrumentele de AI în fiecare etapă a d
 - *"Review the whole pipeline the traffic goes through. identify any errors/inconsistencies"* → a dus la identificarea schemei greșite UUID vs integer
 - *"check the backend. especially the way events/alerts are handled. do you see anything that can be better (especially for a live demo)"* → a produs 7 fix-uri concrete (N+1, prompt mismatch, ollama timeout etc.)
 - *"why is the incidents tab always empty"* → a identificat că `createIncident` exista în API dar nu era apelat din UI nicăieri
-- *"there is a problem with agent 2. agent 2 takes too long to respond"* → analiza prompt size vs output tokens, fix prin reducerea câmpurilor cerute LLM-ului
+- *"there is a problem with agent 2. agent 2 takes too long to respond (...more details here)"* → analiza prompt size vs output tokens, fix prin reducerea câmpurilor cerute LLM-ului
 
 ---
 
