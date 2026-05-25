@@ -95,7 +95,7 @@ This section maps each grading criterion from the lab requirements to where it l
 |---|---|
 | Working application (live demo) | Run `make build` — full stack via Docker Compose |
 | ≥ 2 AI agents (functional, local LLM) | [Agent 1 — Threat Analyst](services/agents/agent1_threat_analyst.py) + [Agent 2 — Incident Response](services/agents/agent2_incident_response.py), both using local Ollama (`llama3.2:3b`) |
-| Offline demo recording | *(YouTube link to be added before final presentation)* |
+| Offline demo recording | [https://drive.google.com/file/d/1c85MTo51U6TJjuxtAysE-oai_bCYVMFR/view?usp=sharing] |
 | Original topic | SIEM tool — not covered by the "Dezvoltarea aplicațiilor web" semester 1 course |
 
 ### B. Software Development Process with AI (10 pts)

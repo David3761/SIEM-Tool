@@ -129,7 +129,7 @@ class FakeWebSocket extends EventTarget {
               severity_justification: "Destination is cloud storage; volume anomaly warrants investigation.",
               mitre_tactic: "TA0010 - Exfiltration",
               mitre_technique: "T1567 - Exfiltration Over Web Service",
-              confidence: 65,
+              confidence: 0.65,
               is_false_positive_likely: true,
               recommended_action: "Verify with the asset owner whether a scheduled backup was running at this time.",
               iocs: ["10.0.0.12"],
