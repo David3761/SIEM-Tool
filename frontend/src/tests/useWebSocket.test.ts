@@ -3,29 +3,23 @@ import { renderHook, act } from "@testing-library/react";
 import { useWebSocket } from "../hooks/useWebSocket";
 import type { NetworkEvent, Alert } from "../types";
 
-// Mock WebSocket
-class MockWebSocket {
-  static instances: MockWebSocket[] = [];
+// Minimal EventSource mock — the hook uses SSE (Mercure), not WebSocket.
+class MockEventSource {
+  static instances: MockEventSource[] = [];
 
-  readyState: number = WebSocket.CONNECTING;
   onopen: (() => void) | null = null;
-  onclose: ((event: CloseEvent) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
-  onerror: ((event: Event) => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
 
   constructor(public url: string) {
-    MockWebSocket.instances.push(this);
-    // Simulate async connection
-    setTimeout(() => {
-      this.readyState = WebSocket.OPEN;
-      this.onopen?.();
-    }, 0);
+    MockEventSource.instances.push(this);
+    // Async-simulate connection open on the next tick
+    setTimeout(() => this.onopen?.(), 0);
   }
 
   close() {
-    this.readyState = WebSocket.CLOSED;
-    const event = new CloseEvent("close");
-    this.onclose?.(event);
+    this.closed = true;
   }
 
   simulateMessage(data: object) {
@@ -33,30 +27,33 @@ class MockWebSocket {
     this.onmessage?.(event);
   }
 
-  simulateClose() {
-    this.close();
+  simulateError() {
+    this.onerror?.();
   }
-
-  send(_data: string) {}
 }
 
-let originalWebSocket: typeof WebSocket;
+let originalEventSource: typeof EventSource | undefined;
 
 beforeEach(() => {
-  MockWebSocket.instances = [];
-  originalWebSocket = global.WebSocket;
-  (global as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
+  MockEventSource.instances = [];
+  originalEventSource = (globalThis as { EventSource?: typeof EventSource }).EventSource;
+  (globalThis as unknown as { EventSource: typeof MockEventSource }).EventSource =
+    MockEventSource as unknown as typeof EventSource;
   vi.useFakeTimers();
 });
 
 afterEach(() => {
-  global.WebSocket = originalWebSocket;
+  if (originalEventSource) {
+    (globalThis as unknown as { EventSource: typeof EventSource }).EventSource = originalEventSource;
+  } else {
+    delete (globalThis as unknown as { EventSource?: typeof EventSource }).EventSource;
+  }
   vi.useRealTimers();
   vi.clearAllTimers();
 });
 
-describe("useWebSocket", () => {
-  it("returns isConnected=false initially and true after connection opens", async () => {
+describe("useWebSocket (SSE)", () => {
+  it("returns isConnected=false initially and true after onopen", async () => {
     const { result } = renderHook(() => useWebSocket({}));
 
     expect(result.current.isConnected).toBe(false);
@@ -72,11 +69,9 @@ describe("useWebSocket", () => {
     const onTrafficEvent = vi.fn();
     renderHook(() => useWebSocket({ onTrafficEvent }));
 
-    await act(async () => {
-      vi.runAllTimers();
-    });
+    await act(async () => { vi.runAllTimers(); });
 
-    const ws = MockWebSocket.instances[0];
+    const es = MockEventSource.instances[0];
     const mockEvent: Partial<NetworkEvent> = {
       id: "evt-1",
       src_ip: "1.2.3.4",
@@ -85,7 +80,7 @@ describe("useWebSocket", () => {
     };
 
     act(() => {
-      ws.simulateMessage({ type: "traffic_event", data: mockEvent });
+      es.simulateMessage({ type: "traffic_event", data: mockEvent });
     });
 
     expect(onTrafficEvent).toHaveBeenCalledWith(mockEvent);
@@ -95,11 +90,9 @@ describe("useWebSocket", () => {
     const onNewAlert = vi.fn();
     renderHook(() => useWebSocket({ onNewAlert }));
 
-    await act(async () => {
-      vi.runAllTimers();
-    });
+    await act(async () => { vi.runAllTimers(); });
 
-    const ws = MockWebSocket.instances[0];
+    const es = MockEventSource.instances[0];
     const mockAlert: Partial<Alert> = {
       id: "alert-1",
       rule_name: "Port Scan",
@@ -107,7 +100,7 @@ describe("useWebSocket", () => {
     };
 
     act(() => {
-      ws.simulateMessage({ type: "new_alert", data: mockAlert });
+      es.simulateMessage({ type: "new_alert", data: mockAlert });
     });
 
     expect(onNewAlert).toHaveBeenCalledWith(mockAlert);
@@ -117,75 +110,64 @@ describe("useWebSocket", () => {
     const onAlertUpdated = vi.fn();
     renderHook(() => useWebSocket({ onAlertUpdated }));
 
-    await act(async () => {
-      vi.runAllTimers();
-    });
+    await act(async () => { vi.runAllTimers(); });
 
-    const ws = MockWebSocket.instances[0];
+    const es = MockEventSource.instances[0];
     const updatedAlert: Partial<Alert> = { id: "alert-1", status: "acknowledged" };
 
     act(() => {
-      ws.simulateMessage({ type: "alert_updated", data: updatedAlert });
+      es.simulateMessage({ type: "alert_updated", data: updatedAlert });
     });
 
     expect(onAlertUpdated).toHaveBeenCalledWith(updatedAlert);
   });
 
-  it("sets isConnected=false after disconnect", async () => {
+  it("sets isConnected=false on error", async () => {
     const { result } = renderHook(() => useWebSocket({}));
 
-    await act(async () => {
-      vi.runAllTimers();
-    });
-
+    await act(async () => { vi.runAllTimers(); });
     expect(result.current.isConnected).toBe(true);
 
-    const ws = MockWebSocket.instances[0];
-
     act(() => {
-      ws.simulateClose();
+      MockEventSource.instances[0].simulateError();
     });
 
     expect(result.current.isConnected).toBe(false);
   });
 
-  it("reconnects after disconnect with exponential backoff", async () => {
-    renderHook(() => useWebSocket({}));
-
-    await act(async () => {
-      vi.runAllTimers();
-    });
-
-    expect(MockWebSocket.instances).toHaveLength(1);
-
-    // Close the connection
-    act(() => {
-      MockWebSocket.instances[0].simulateClose();
-    });
-
-    // Fast-forward 1s (initial backoff)
-    await act(async () => {
-      vi.advanceTimersByTime(1100);
-    });
-
-    // A new WebSocket connection should have been created
-    expect(MockWebSocket.instances.length).toBeGreaterThan(1);
-  });
-
   it("ignores malformed JSON messages without throwing", async () => {
     renderHook(() => useWebSocket({}));
 
-    await act(async () => {
-      vi.runAllTimers();
-    });
+    await act(async () => { vi.runAllTimers(); });
 
-    const ws = MockWebSocket.instances[0];
+    const es = MockEventSource.instances[0];
 
     expect(() => {
       act(() => {
         const event = new MessageEvent("message", { data: "not-valid-json{{" });
-        ws.onmessage?.(event);
+        es.onmessage?.(event);
       });
     }).not.toThrow();
+  });
+
+  it("subscribes to all required Mercure topics in the URL", async () => {
+    renderHook(() => useWebSocket({}));
+    await act(async () => { vi.runAllTimers(); });
+
+    const url = MockEventSource.instances[0].url;
+    expect(url).toContain("topic=traffic%2Fevents");
+    expect(url).toContain("topic=alerts%2Fnew");
+    expect(url).toContain("topic=alerts%2Fupdated");
+  });
+
+  it("closes the EventSource on unmount", async () => {
+    const { unmount } = renderHook(() => useWebSocket({}));
+    await act(async () => { vi.runAllTimers(); });
+
+    const es = MockEventSource.instances[0];
+    expect(es.closed).toBe(false);
+
+    unmount();
+    expect(es.closed).toBe(true);
   });
 });

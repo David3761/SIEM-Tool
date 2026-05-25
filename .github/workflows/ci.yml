@@ -47,7 +47,9 @@ jobs:
           coverage: none
 
       - name: Validate composer.json
-        run: composer validate --strict
+        # --strict requires `name` and `description` fields meant for libraries.
+        # This is an application, not a publishable package.
+        run: composer validate --no-check-publish
 
       - name: Cache composer dependencies
         uses: actions/cache@v4
